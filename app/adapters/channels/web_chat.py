@@ -1,8 +1,8 @@
 """ChannelAdapter de chat web (plan B, §9) — Fase 9.
 
 Segundo adaptador del mismo puerto `ChannelAdapter` — la prueba viviente del
-argumento de extensibilidad (§7.1) y el respaldo si Twilio/Fly.io fallan en vivo
-(§9). A diferencia de WhatsApp (respuesta out-of-band por la API de Twilio), el
+argumento de extensibilidad (§7.1) y el respaldo si Meta/Fly.io fallan en vivo
+(§9). A diferencia de WhatsApp (respuesta out-of-band por la Graph API de Meta), el
 web chat es request/response: este canal CAPTURA los envíos para devolverlos en
 la misma respuesta HTTP.
 """

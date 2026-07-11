@@ -2,7 +2,7 @@
 
 Prueba el pipeline completo del orquestador (consentimiento → guardrail stub →
 eco → audit → send) y el webhook asíncrono, sin red ni Supabase. El gate real
-(WhatsApp → Fly.io) se verifica a mano contra el sandbox de Twilio.
+(WhatsApp → Fly.io) se verifica a mano contra WhatsApp Cloud API de Meta.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.adapters.channels.whatsapp_twilio import WhatsAppTwilioAdapter
+from app.adapters.channels.whatsapp_meta import WhatsAppMetaAdapter
 from app.application.process_message import AVISO_LEGAL, ProcessMessage
 from app.application.router import EcoHandler, InMemoryAgentRegistry
 from app.domain.models import (
@@ -201,19 +201,36 @@ async def test_historial_llega_al_handler():
     assert len(historial) == 6  # 3 turnos × (user + assistant)
 
 
-# --- adaptador Twilio ------------------------------------------------------------
-def test_twilio_parse_normaliza_el_form():
-    adapter = WhatsAppTwilioAdapter("AC123", "token", "whatsapp:+14155238886")
-    incoming = adapter.parse(
-        {"From": "whatsapp:+50370000000", "Body": " hola ", "ProfileName": "Ana"}
-    )
+# --- adaptador Meta (WhatsApp Cloud API) -----------------------------------------
+def _meta_payload(texto: str, telefono: str = "50370000000", nombre: str = "Ana") -> dict:
+    """Simula el webhook JSON de Meta con un mensaje de texto."""
+    return {
+        "object": "whatsapp_business_account",
+        "entry": [{"changes": [{"field": "messages", "value": {
+            "contacts": [{"profile": {"name": nombre}, "wa_id": telefono}],
+            "messages": [{"from": telefono, "id": "wamid.x", "type": "text", "text": {"body": texto}}],
+        }}]}],
+    }
+
+
+def test_meta_parse_normaliza_el_json():
+    adapter = WhatsAppMetaAdapter("token", "1234567890")
+    incoming = adapter.parse(_meta_payload(" hola ", nombre="Ana"))
     assert incoming.canal == "whatsapp"
-    assert incoming.telefono == "+50370000000"
+    assert incoming.telefono == "+50370000000"  # Meta manda sin '+', se normaliza a E.164
     assert incoming.texto == "hola"
     assert incoming.nombre_perfil == "Ana"
 
 
-# --- webhook: 200 inmediato + background ------------------------------------------
+def test_meta_parse_status_update_sin_mensaje_queda_vacio():
+    adapter = WhatsAppMetaAdapter("token", "1234567890")
+    status = {"object": "whatsapp_business_account", "entry": [{"changes": [{"value": {
+        "statuses": [{"id": "wamid.x", "status": "delivered"}]}}]}]}
+    incoming = adapter.parse(status)
+    assert incoming.telefono == "" and incoming.texto == ""
+
+
+# --- webhook: verificación GET + 200 inmediato + background ------------------------
 class FakeProcess:
     """Registra qué corrió síncrono (preprocess) y qué en background (run_agent)."""
 
@@ -232,20 +249,34 @@ class FakeProcess:
 
 def _app_webhook(process: FakeProcess) -> FastAPI:
     app = FastAPI()
-    app.state.channel = WhatsAppTwilioAdapter("AC123", "token", "whatsapp:+1415")
+    app.state.channel = WhatsAppMetaAdapter("token", "1234567890")
     app.state.process_message = process
+    app.state.whatsapp_verify_token = "vt"
+    app.state.whatsapp_app_secret = ""  # sin firma en tests
     app.include_router(webhook.router)
     return app
 
 
+def test_webhook_verificacion_meta_devuelve_challenge():
+    resp = TestClient(_app_webhook(FakeProcess())).get(
+        "/webhook/whatsapp",
+        params={"hub.mode": "subscribe", "hub.verify_token": "vt", "hub.challenge": "42"},
+    )
+    assert resp.status_code == 200 and resp.text == "42"
+
+
+def test_webhook_verificacion_rechaza_token_malo():
+    resp = TestClient(_app_webhook(FakeProcess())).get(
+        "/webhook/whatsapp",
+        params={"hub.mode": "subscribe", "hub.verify_token": "malo", "hub.challenge": "42"},
+    )
+    assert resp.status_code == 403
+
+
 def test_webhook_responde_200_y_delega_el_agente_a_background():
     process = FakeProcess(contexto="ctx")
-    resp = TestClient(_app_webhook(process)).post(
-        "/webhook/whatsapp",
-        data={"From": "whatsapp:+50370000000", "Body": "hola"},
-    )
+    resp = TestClient(_app_webhook(process)).post("/webhook/whatsapp", json=_meta_payload("hola"))
     assert resp.status_code == 200
-    assert "<Response>" in resp.text  # TwiML vacío: la respuesta va por REST
     assert len(process.preprocesados) == 1  # guardrail síncrono antes del 200
     assert process.agentes == ["ctx"]  # el agente corrió en background
 
@@ -253,19 +284,16 @@ def test_webhook_responde_200_y_delega_el_agente_a_background():
 def test_webhook_no_lanza_agente_si_preprocess_atendio_el_mensaje():
     process = FakeProcess(contexto=None)  # sensible o aviso legal → None
     resp = TestClient(_app_webhook(process)).post(
-        "/webhook/whatsapp",
-        data={"From": "whatsapp:+50370000000", "Body": "quiero invertir"},
+        "/webhook/whatsapp", json=_meta_payload("quiero invertir")
     )
     assert resp.status_code == 200
     assert len(process.preprocesados) == 1
     assert process.agentes == []
 
 
-def test_webhook_ignora_payload_vacio():
+def test_webhook_ignora_evento_sin_mensaje():
     process = FakeProcess()
-    resp = TestClient(_app_webhook(process)).post(
-        "/webhook/whatsapp", data={"From": "", "Body": ""}
-    )
+    resp = TestClient(_app_webhook(process)).post("/webhook/whatsapp", json={"object": "x", "entry": []})
     assert resp.status_code == 200
     assert process.preprocesados == []
 
@@ -277,8 +305,9 @@ def test_health_del_composition_root(monkeypatch):
         "GROQ_API_KEY": "test",
         "SUPABASE_URL": "http://supabase.invalid",
         "SUPABASE_KEY": "test",
-        "TWILIO_ACCOUNT_SID": "AC123",
-        "TWILIO_AUTH_TOKEN": "test",
+        "WHATSAPP_TOKEN": "EAAtest",
+        "WHATSAPP_PHONE_NUMBER_ID": "1234567890",
+        "WHATSAPP_VERIFY_TOKEN": "vt",
     }.items():
         monkeypatch.setenv(k, v)
 

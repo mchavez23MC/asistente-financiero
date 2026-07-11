@@ -5,8 +5,8 @@ núcleo: usa `Repository` y `ChannelAdapter`, los mismos puertos que el webhook.
 La lógica está en `revisar_presupuestos` (pura, testeable); el scheduler solo
 la agenda.
 
-Ventana de 24h de WhatsApp (§7.6): fuera de la ventana Twilio solo permite
-plantillas pre-aprobadas. En sandbox se envía texto y se documenta la limitación.
+Ventana de 24h de WhatsApp (§7.6): fuera de la ventana Meta solo permite
+plantillas pre-aprobadas. En pruebas se envía texto y se documenta la limitación.
 Idempotencia: `alerts` evita notificar dos veces el mismo cruce por periodo.
 """
 

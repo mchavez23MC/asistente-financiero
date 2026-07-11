@@ -51,7 +51,7 @@ class ChannelAdapter(Protocol):
         ...
 
     async def send(self, user: User, text: str) -> None:
-        """Envía `text` al usuario por este canal (API REST de Twilio, etc.)."""
+        """Envía `text` al usuario por este canal (Graph API de Meta, etc.)."""
         ...
 
 

@@ -218,7 +218,7 @@ class Ticket(BaseModel):
 class IncomingMessage(BaseModel):
     """Formato canónico de mensaje entrante (§7.1 / §7.2).
 
-    Todo `ChannelAdapter` (Twilio, web chat, Telegram futuro) normaliza su
+    Todo `ChannelAdapter` (WhatsApp/Meta, web chat, Telegram futuro) normaliza su
     payload a ESTA forma. El orquestador nunca conoce el canal original.
     """
 

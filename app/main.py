@@ -16,7 +16,7 @@ import logging
 
 from fastapi import FastAPI
 
-from app.adapters.channels.whatsapp_twilio import WhatsAppTwilioAdapter
+from app.adapters.channels.whatsapp_meta import WhatsAppMetaAdapter
 from app.adapters.guardrail.groq_classifier import GroqClassifier
 from app.adapters.guardrail.layered import LayeredGuardrail
 from app.adapters.llm.claude import ClaudeProvider
@@ -37,10 +37,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings = Settings.from_env()
 
     # --- adaptadores concretos -------------------------------------------------
-    channel = WhatsAppTwilioAdapter(
-        account_sid=settings.twilio_account_sid,
-        auth_token=settings.twilio_auth_token,
-        from_number=settings.twilio_whatsapp_from,
+    channel = WhatsAppMetaAdapter(
+        token=settings.whatsapp_token,
+        phone_number_id=settings.whatsapp_phone_number_id,
+        graph_version=settings.graph_api_version,
     )
     repo = SupabaseRepository(settings.supabase_url, settings.supabase_key)
     guardrail = LayeredGuardrail(
@@ -93,6 +93,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.registry = registry
     app.state.process_message = process_message
     app.state.panel_auth = (settings.panel_user, settings.panel_password)
+    # Tokens del webhook de Meta (verificación GET + firma del POST).
+    app.state.whatsapp_verify_token = settings.whatsapp_verify_token
+    app.state.whatsapp_app_secret = settings.whatsapp_app_secret
 
     app.include_router(webhook.router)
     app.include_router(panel.router)
