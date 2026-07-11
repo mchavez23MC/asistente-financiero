@@ -19,7 +19,15 @@ from fastapi.testclient import TestClient
 from app.adapters.channels.whatsapp_twilio import WhatsAppTwilioAdapter
 from app.application.process_message import AVISO_LEGAL, ProcessMessage
 from app.application.router import EcoHandler, InMemoryAgentRegistry
-from app.domain.models import GuardrailResult, IncomingMessage, Message, Ticket, Transaction, User
+from app.domain.models import (
+    Budget,
+    GuardrailResult,
+    IncomingMessage,
+    Message,
+    Ticket,
+    Transaction,
+    User,
+)
 from app.interfaces.api import webhook
 
 
@@ -38,7 +46,9 @@ class FakeRepo:
         self.users: dict[UUID, User] = {}
         self.messages: list[Message] = []
         self.transactions: list[Transaction] = []
-        self.tickets: list[Ticket] = []
+        self.tickets: dict[UUID, Ticket] = {}
+        self.budgets: list[Budget] = []
+        self.alerts: set[tuple] = set()
 
     def get_or_create_user(self, telefono: str, nombre: Optional[str] = None) -> User:
         for u in self.users.values():
@@ -47,6 +57,9 @@ class FakeRepo:
         user = User(id=uuid4(), telefono=telefono, nombre=nombre)
         self.users[user.id] = user
         return user
+
+    def get_user(self, user_id: UUID) -> Optional[User]:
+        return self.users.get(user_id)
 
     def registrar_consentimiento(self, user_id: UUID) -> User:
         user = self.users[user_id].model_copy(
@@ -64,22 +77,67 @@ class FakeRepo:
         propios = [m for m in self.messages if m.user_id == user_id]
         return propios[-n:]
 
+    def recent_messages(self, n: int = 100) -> list[Message]:
+        return list(reversed(self.messages))[:n]
+
     def save_transaction(self, transaction: Transaction) -> Transaction:
-        self.transactions.append(transaction)
-        return transaction
+        if transaction.id is not None:
+            self.transactions = [t for t in self.transactions if t.id != transaction.id]
+            saved = transaction
+        else:
+            saved = transaction.model_copy(update={"id": uuid4()})
+        self.transactions.append(saved)
+        return saved
 
     def get_pending_transaction(self, user_id: UUID) -> Optional[Transaction]:
+        estado = "pendiente_confirmacion"
+        for t in self.transactions:
+            status = t.status if isinstance(t.status, str) else t.status.value
+            if t.user_id == user_id and status == estado:
+                return t
         return None
 
     def get_budgets(self, user_id: UUID) -> list:
-        return []
+        return [b for b in self.budgets if b.user_id == user_id]
+
+    def get_all_budgets(self) -> list:
+        return list(self.budgets)
 
     def sum_gastos(self, user_id, categoria=None, periodo=None) -> Decimal:
-        return Decimal("0")
+        total = Decimal("0")
+        for t in self.transactions:
+            status = t.status if isinstance(t.status, str) else t.status.value
+            if t.user_id != user_id or status != "confirmada" or t.monto is None:
+                continue
+            if categoria and t.categoria != categoria:
+                continue
+            total += t.monto
+        return total
 
     def create_ticket(self, ticket: Ticket) -> Ticket:
-        self.tickets.append(ticket)
+        ticket = ticket.model_copy(update={"id": ticket.id or uuid4()})
+        self.tickets[ticket.id] = ticket
         return ticket
+
+    def list_tickets(self, estado: Optional[str] = None) -> list[Ticket]:
+        vals = list(self.tickets.values())
+        if estado:
+            vals = [t for t in vals if (t.estado if isinstance(t.estado, str) else t.estado.value) == estado]
+        return sorted(vals, key=lambda t: t.created_at, reverse=True)
+
+    def get_ticket(self, ticket_id: UUID) -> Optional[Ticket]:
+        return self.tickets.get(ticket_id)
+
+    def update_ticket_estado(self, ticket_id: UUID, estado: str) -> Ticket:
+        t = self.tickets[ticket_id].model_copy(update={"estado": estado})
+        self.tickets[ticket_id] = t
+        return t
+
+    def alerta_ya_enviada(self, budget_id: UUID, periodo_clave: str) -> bool:
+        return (budget_id, periodo_clave) in self.alerts
+
+    def marcar_alerta(self, user_id: UUID, budget_id: UUID, periodo_clave: str) -> None:
+        self.alerts.add((budget_id, periodo_clave))
 
 
 class FakeChannel:

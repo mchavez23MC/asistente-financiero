@@ -37,13 +37,18 @@ class LayeredGuardrail:
             )
 
         # Clasificador Groq, acotado por timeout. Fail-closed ante todo (§7.3.4).
+        # Se distingue timeout de error (ej. rate-limit) para diagnóstico/calibración.
         try:
             resultado = await asyncio.wait_for(
                 self._classifier.classify(texto), timeout=self._timeout
             )
+        except asyncio.TimeoutError:
+            return GuardrailResult(
+                sensible=True, categoria="desconocida", confianza=0.0, fuente="fail_closed_timeout"
+            )
         except Exception:
             return GuardrailResult(
-                sensible=True, categoria="desconocida", confianza=0.0, fuente="fail_closed"
+                sensible=True, categoria="desconocida", confianza=0.0, fuente="fail_closed_error"
             )
 
         # Capa 2: baja confianza → se fuerza sensible, sin nueva inferencia.

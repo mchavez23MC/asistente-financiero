@@ -103,3 +103,17 @@ create table if not exists tickets (
     resuelto_at       timestamptz
 );
 create index if not exists idx_tickets_estado on tickets (estado, prioridad, created_at desc);
+
+-- ---------------------------------------------------------------------
+-- alerts — idempotencia del scheduler proactivo (fase 7, §7.6)
+-- Una fila por (presupuesto, periodo) ya notificado, para no alertar dos veces
+-- el mismo cruce de umbral.
+-- ---------------------------------------------------------------------
+create table if not exists alerts (
+    id            uuid primary key default gen_random_uuid(),
+    user_id       uuid not null references users(id) on delete cascade,
+    budget_id     uuid not null references budgets(id) on delete cascade,
+    periodo_clave text not null,               -- ej. 'mensual:2026-07'
+    created_at    timestamptz not null default now(),
+    unique (budget_id, periodo_clave)
+);

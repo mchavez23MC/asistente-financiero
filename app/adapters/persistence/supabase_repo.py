@@ -67,6 +67,16 @@ class SupabaseRepository:
         # Se devuelven en orden cronológico, listos para el prompt (§3.1).
         return [Message(**row) for row in reversed(res.data)]
 
+    def recent_messages(self, n: int = 100) -> list[Message]:
+        res = (
+            self._db.table("messages")
+            .select("*")
+            .order("timestamp", desc=True)
+            .limit(n)
+            .execute()
+        )
+        return [Message(**row) for row in res.data]
+
     # --- transacciones (H1) ---------------------------------------------------
     def save_transaction(self, transaction: Transaction) -> Transaction:
         data = _dump(transaction)
@@ -120,6 +130,56 @@ class SupabaseRepository:
     def create_ticket(self, ticket: Ticket) -> Ticket:
         res = self._db.table("tickets").insert(_dump(ticket)).execute()
         return Ticket(**res.data[0])
+
+    # --- panel humano (fase 6) --------------------------------------------------
+    def get_user(self, user_id: UUID) -> Optional[User]:
+        res = self._db.table("users").select("*").eq("id", str(user_id)).limit(1).execute()
+        return User(**res.data[0]) if res.data else None
+
+    def list_tickets(self, estado: Optional[str] = None) -> list[Ticket]:
+        q = self._db.table("tickets").select("*")
+        if estado:
+            q = q.eq("estado", estado)
+        res = q.order("created_at", desc=True).execute()
+        return [Ticket(**row) for row in res.data]
+
+    def get_ticket(self, ticket_id: UUID) -> Optional[Ticket]:
+        res = self._db.table("tickets").select("*").eq("id", str(ticket_id)).limit(1).execute()
+        return Ticket(**res.data[0]) if res.data else None
+
+    def update_ticket_estado(self, ticket_id: UUID, estado: str) -> Ticket:
+        cambios: dict = {"estado": estado, "updated_at": datetime.now(timezone.utc).isoformat()}
+        if estado in ("resuelto", "cerrado"):
+            cambios["resuelto_at"] = datetime.now(timezone.utc).isoformat()
+        res = (
+            self._db.table("tickets").update(cambios).eq("id", str(ticket_id)).execute()
+        )
+        return Ticket(**res.data[0])
+
+    # --- scheduler proactivo (fase 7) -------------------------------------------
+    def get_all_budgets(self) -> list[Budget]:
+        res = self._db.table("budgets").select("*").execute()
+        return [Budget(**row) for row in res.data]
+
+    def alerta_ya_enviada(self, budget_id: UUID, periodo_clave: str) -> bool:
+        res = (
+            self._db.table("alerts")
+            .select("id")
+            .eq("budget_id", str(budget_id))
+            .eq("periodo_clave", periodo_clave)
+            .limit(1)
+            .execute()
+        )
+        return bool(res.data)
+
+    def marcar_alerta(self, user_id: UUID, budget_id: UUID, periodo_clave: str) -> None:
+        self._db.table("alerts").insert(
+            {
+                "user_id": str(user_id),
+                "budget_id": str(budget_id),
+                "periodo_clave": periodo_clave,
+            }
+        ).execute()
 
 
 def _inicio_periodo(periodo: str):

@@ -35,6 +35,11 @@ class Settings:
     twilio_whatsapp_from: str
     guardrail_umbral_confianza: float
     guardrail_timeout_ms: int
+    claude_max_tokens: int
+    panel_user: str
+    panel_password: str
+    scheduler_habilitado: bool
+    scheduler_intervalo_min: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -52,4 +57,10 @@ class Settings:
                 os.environ.get("GUARDRAIL_UMBRAL_CONFIANZA", "0.7")
             ),
             guardrail_timeout_ms=int(os.environ.get("GUARDRAIL_TIMEOUT_MS", "800")),
+            claude_max_tokens=int(os.environ.get("CLAUDE_MAX_TOKENS", "1024")),
+            panel_user=os.environ.get("PANEL_USER", "admin"),
+            panel_password=os.environ.get("PANEL_PASSWORD", "cambiar-esto"),
+            scheduler_habilitado=os.environ.get("SCHEDULER_HABILITADO", "true").lower()
+            in ("1", "true", "yes"),
+            scheduler_intervalo_min=int(os.environ.get("SCHEDULER_INTERVALO_MIN", "30")),
         )

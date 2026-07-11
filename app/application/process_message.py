@@ -54,7 +54,7 @@ _MOTIVOS_VALIDOS = {m.value for m in MotivoEscalacion}
 
 
 def _motivo_de(veredicto: GuardrailResult) -> MotivoEscalacion:
-    if veredicto.fuente == "fail_closed":
+    if veredicto.fuente.startswith("fail_closed"):
         return MotivoEscalacion.GUARDRAIL_FAIL_CLOSED
     if veredicto.categoria in _MOTIVOS_VALIDOS:
         return MotivoEscalacion(veredicto.categoria)
@@ -119,7 +119,7 @@ class ProcessMessage:
     # ------------------------------------------------------------------ etapa 2
     async def run_agent(self, context: AgentContext) -> None:
         """Solo el trabajo del LLM; corre en background tras el 200 (§7.5)."""
-        handler = self._registry.get("eco")  # fase 4: el router decide el intent
+        handler = self._registry.get("principal")  # agente Claude (o 'eco' en tests)
         result: AgentResult = await handler.handle(context)
         self._audit_respuesta(
             context.user.id, result.respuesta, result.intencion, result.tool_llamada

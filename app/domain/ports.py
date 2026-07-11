@@ -136,6 +136,10 @@ class Repository(Protocol):
     def get_last_n_messages(self, user_id: UUID, n: int = 10) -> list[Message]:
         ...
 
+    def recent_messages(self, n: int = 100) -> list[Message]:
+        """Últimos mensajes de todos los usuarios (audit trail del panel, §7.4)."""
+        ...
+
     # --- transacciones (H1) ---
     def save_transaction(self, transaction: Transaction) -> Transaction:
         ...
@@ -158,4 +162,30 @@ class Repository(Protocol):
 
     # --- tickets (escalación) ---
     def create_ticket(self, ticket: Ticket) -> Ticket:
+        ...
+
+    # --- panel humano (fase 6) ---
+    def get_user(self, user_id: UUID) -> Optional[User]:
+        ...
+
+    def list_tickets(self, estado: Optional[str] = None) -> list[Ticket]:
+        """Cola de tickets, más nuevos primero; opcionalmente filtrada por estado."""
+        ...
+
+    def get_ticket(self, ticket_id: UUID) -> Optional[Ticket]:
+        ...
+
+    def update_ticket_estado(self, ticket_id: UUID, estado: str) -> Ticket:
+        ...
+
+    # --- scheduler proactivo (fase 7) ---
+    def get_all_budgets(self) -> list[Budget]:
+        """Todos los presupuestos de todos los usuarios (para el cron de alertas)."""
+        ...
+
+    def alerta_ya_enviada(self, budget_id: UUID, periodo_clave: str) -> bool:
+        """Idempotencia: ¿ya se notificó este cruce de umbral en este periodo?"""
+        ...
+
+    def marcar_alerta(self, user_id: UUID, budget_id: UUID, periodo_clave: str) -> None:
         ...

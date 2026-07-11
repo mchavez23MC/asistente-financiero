@@ -103,13 +103,13 @@ async def test_clasificador_sensible_se_respeta():
 async def test_groq_caido_es_fail_closed():
     g = LayeredGuardrail(BrokenClassifier())
     r = await g.classify("mensaje cualquiera")
-    assert r.sensible and r.fuente == "fail_closed" and r.confianza == 0.0
+    assert r.sensible and r.fuente == "fail_closed_error" and r.confianza == 0.0
 
 
 async def test_groq_colgado_es_fail_closed_por_timeout():
     g = LayeredGuardrail(HangingClassifier(), timeout_ms=50)
     r = await g.classify("mensaje cualquiera")
-    assert r.sensible and r.fuente == "fail_closed"
+    assert r.sensible and r.fuente == "fail_closed_timeout"
 
 
 # --- ruta sensible en el orquestador -------------------------------------------------
@@ -140,7 +140,7 @@ async def test_ruta_sensible_crea_ticket_y_no_llega_al_agente():
     await process(_msg("quiero invertir en cripto"))
 
     assert len(repo.tickets) == 1
-    ticket = repo.tickets[0]
+    ticket = repo.list_tickets()[0]
     assert ticket.motivo == "consejo_inversion"
     assert "fuente=denylist" in ticket.contexto
     assert ticket.mensaje_origen_id is not None
@@ -155,7 +155,7 @@ async def test_fail_closed_crea_ticket_con_motivo_propio():
     await process(_msg("hola"))
     await process(_msg("gasté 25 en pupusas"))  # normal, pero Groq está caído
 
-    assert repo.tickets[0].motivo == "guardrail_fail_closed"
+    assert repo.list_tickets()[0].motivo == "guardrail_fail_closed"
     assert channel.enviados[-1][1] == RESPUESTA_FAIL_CLOSED
 
 
@@ -164,5 +164,5 @@ async def test_fraude_escala_con_prioridad_alta():
     process, repo, _ = _pipeline_sensible(g)
     await process(_msg("hola"))
     await process(_msg("me estafaron con un cobro"))
-    assert repo.tickets[0].motivo == "fraude"
-    assert repo.tickets[0].prioridad == "alta"
+    assert repo.list_tickets()[0].motivo == "fraude"
+    assert repo.list_tickets()[0].prioridad == "alta"
