@@ -10,8 +10,10 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from app.adapters.channels.whatsapp_twilio import WhatsAppTwilioAdapter
+from app.adapters.guardrail.groq_classifier import GroqClassifier
+from app.adapters.guardrail.layered import LayeredGuardrail
 from app.adapters.persistence.supabase_repo import SupabaseRepository
-from app.application.process_message import ProcessMessage, StubGuardrail
+from app.application.process_message import ProcessMessage
 from app.application.router import EcoHandler, InMemoryAgentRegistry
 from app.infra.config import Settings
 from app.interfaces.api import webhook
@@ -37,11 +39,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     registry = InMemoryAgentRegistry()
     registry.register(EcoHandler())  # fase 4 lo reemplaza por el agente Claude
 
+    # Guardrail real (fase 3): denylist → Groq → umbral, fail-closed (§7.3).
+    guardrail = LayeredGuardrail(
+        classifier=GroqClassifier(settings.groq_api_key, settings.groq_model),
+        umbral_confianza=settings.guardrail_umbral_confianza,
+        timeout_ms=settings.guardrail_timeout_ms,
+    )
+
     app.state.channel = channel
     app.state.repo = repo
     app.state.process_message = ProcessMessage(
         repo=repo,
-        guardrail=StubGuardrail(),  # fase 3 lo reemplaza por denylist+Groq
+        guardrail=guardrail,
         registry=registry,
         channel=channel,
     )

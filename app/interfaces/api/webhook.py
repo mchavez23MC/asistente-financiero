@@ -1,9 +1,9 @@
 """Webhook de WhatsApp — asíncrono desde el día uno (§7.5, no negociable).
 
-Twilio recibe un 200 con TwiML vacío de inmediato; el pipeline completo corre
-en `BackgroundTasks` y la respuesta al usuario sale por la API REST de Twilio.
-Nota fase 3: cuando el guardrail sea real, su clasificación se moverá síncrona
-antes del 200 — solo el trabajo de Claude queda en background.
+Fase 3: `preprocess` (consentimiento + guardrail fail-closed) corre SÍNCRONO
+antes de devolver el 200 — un mensaje sensible queda escalado aunque el proceso
+muera después. Solo el trabajo del agente (Claude) va en `BackgroundTasks`; la
+respuesta al usuario sale por la API REST de Twilio, no por el TwiML.
 """
 
 from __future__ import annotations
@@ -24,6 +24,9 @@ async def webhook_whatsapp(request: Request, background: BackgroundTasks) -> Res
 
     incoming = channel.parse(dict(form))
     if incoming.telefono and incoming.texto:
-        background.add_task(process_message, incoming)
+        # Síncrono: consentimiento + guardrail (§7.5). None = ya atendido.
+        context = await process_message.preprocess(incoming)
+        if context is not None:
+            background.add_task(process_message.run_agent, context)
 
     return Response(content=TWIML_VACIO, media_type="text/xml")

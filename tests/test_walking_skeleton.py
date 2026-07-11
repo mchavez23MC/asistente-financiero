@@ -17,10 +17,17 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.adapters.channels.whatsapp_twilio import WhatsAppTwilioAdapter
-from app.application.process_message import AVISO_LEGAL, ProcessMessage, StubGuardrail
+from app.application.process_message import AVISO_LEGAL, ProcessMessage
 from app.application.router import EcoHandler, InMemoryAgentRegistry
-from app.domain.models import IncomingMessage, Message, Ticket, Transaction, User
+from app.domain.models import GuardrailResult, IncomingMessage, Message, Ticket, Transaction, User
 from app.interfaces.api import webhook
+
+
+class StubGuardrail:
+    """Deja pasar todo — el guardrail real se prueba en test_guardrail.py."""
+
+    async def classify(self, texto: str) -> GuardrailResult:
+        return GuardrailResult(sensible=False, fuente="stub")
 
 
 # --- fakes -------------------------------------------------------------------
@@ -149,41 +156,60 @@ def test_twilio_parse_normaliza_el_form():
 
 
 # --- webhook: 200 inmediato + background ------------------------------------------
-def test_webhook_responde_200_y_procesa_en_background():
+class FakeProcess:
+    """Registra qué corrió síncrono (preprocess) y qué en background (run_agent)."""
+
+    def __init__(self, contexto=None) -> None:
+        self.preprocesados: list[IncomingMessage] = []
+        self.agentes: list = []
+        self._contexto = contexto
+
+    async def preprocess(self, incoming: IncomingMessage):
+        self.preprocesados.append(incoming)
+        return self._contexto
+
+    async def run_agent(self, context) -> None:
+        self.agentes.append(context)
+
+
+def _app_webhook(process: FakeProcess) -> FastAPI:
     app = FastAPI()
-    procesados: list[IncomingMessage] = []
-
-    async def fake_process(incoming: IncomingMessage) -> None:
-        procesados.append(incoming)
-
     app.state.channel = WhatsAppTwilioAdapter("AC123", "token", "whatsapp:+1415")
-    app.state.process_message = fake_process
+    app.state.process_message = process
     app.include_router(webhook.router)
+    return app
 
-    client = TestClient(app)
-    resp = client.post(
+
+def test_webhook_responde_200_y_delega_el_agente_a_background():
+    process = FakeProcess(contexto="ctx")
+    resp = TestClient(_app_webhook(process)).post(
         "/webhook/whatsapp",
         data={"From": "whatsapp:+50370000000", "Body": "hola"},
     )
     assert resp.status_code == 200
     assert "<Response>" in resp.text  # TwiML vacío: la respuesta va por REST
-    assert len(procesados) == 1 and procesados[0].texto == "hola"
+    assert len(process.preprocesados) == 1  # guardrail síncrono antes del 200
+    assert process.agentes == ["ctx"]  # el agente corrió en background
+
+
+def test_webhook_no_lanza_agente_si_preprocess_atendio_el_mensaje():
+    process = FakeProcess(contexto=None)  # sensible o aviso legal → None
+    resp = TestClient(_app_webhook(process)).post(
+        "/webhook/whatsapp",
+        data={"From": "whatsapp:+50370000000", "Body": "quiero invertir"},
+    )
+    assert resp.status_code == 200
+    assert len(process.preprocesados) == 1
+    assert process.agentes == []
 
 
 def test_webhook_ignora_payload_vacio():
-    app = FastAPI()
-    procesados = []
-
-    async def fake_process(incoming) -> None:
-        procesados.append(incoming)
-
-    app.state.channel = WhatsAppTwilioAdapter("AC123", "token", "whatsapp:+1415")
-    app.state.process_message = fake_process
-    app.include_router(webhook.router)
-
-    resp = TestClient(app).post("/webhook/whatsapp", data={"From": "", "Body": ""})
+    process = FakeProcess()
+    resp = TestClient(_app_webhook(process)).post(
+        "/webhook/whatsapp", data={"From": "", "Body": ""}
+    )
     assert resp.status_code == 200
-    assert procesados == []
+    assert process.preprocesados == []
 
 
 # --- composition root ---------------------------------------------------------------
