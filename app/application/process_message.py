@@ -14,6 +14,7 @@ Pipeline por mensaje entrante, partido en dos etapas (§7.5):
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from app.domain.models import (
@@ -29,6 +30,8 @@ from app.domain.models import (
     TicketPrioridad,
 )
 from app.domain.ports import AgentRegistry, ChannelAdapter, Guardrail, Repository
+
+log = logging.getLogger("e5.orquestador")
 
 # Onboarding legal, en la voz de Luca (paso 0; redacción final la coordina T6).
 AVISO_LEGAL = (
@@ -106,7 +109,7 @@ class ProcessMessage:
             )
             user = self._repo.registrar_consentimiento(user.id)
             self._audit_respuesta(user.id, AVISO_LEGAL, Intencion.CONSENTIMIENTO)
-            await self._channel.send(user, AVISO_LEGAL)
+            await self._enviar_seguro(user, AVISO_LEGAL)
             return None
 
         # --- (1) guardrail síncrono, antes del agente (§7.3 / §7.5)
@@ -133,7 +136,7 @@ class ProcessMessage:
         self._audit_respuesta(
             context.user.id, result.respuesta, result.intencion, result.tool_llamada
         )
-        await self._channel.send(context.user, result.respuesta)
+        await self._enviar_seguro(context.user, result.respuesta)
 
     # ------------------------------------------------------------------ internos
     async def _escalar(
@@ -165,7 +168,16 @@ class ProcessMessage:
         )
         respuesta = RESPUESTA_FAIL_CLOSED if fail_closed else RESPUESTA_SENSIBLE
         self._audit_respuesta(user.id, respuesta, Intencion.SENSIBLE)
-        await self._channel.send(user, respuesta)
+        await self._enviar_seguro(user, respuesta)
+
+    async def _enviar_seguro(self, user, texto: str) -> None:
+        """Envía por el canal sin propagar fallos de entrega. Un 4xx/5xx del
+        canal (ej. Meta) no debe tirar el webhook (evita reintentos → duplicados)
+        ni ensuciar el ciclo con un traceback. El mensaje ya quedó auditado."""
+        try:
+            await self._channel.send(user, texto)
+        except Exception:
+            log.exception("No se pudo entregar el mensaje al usuario %s", user.id)
 
     def _audit_respuesta(
         self,
