@@ -48,6 +48,43 @@ def test_twilio_parse_evento_sin_texto_queda_vacio():
     assert incoming.telefono == "" and incoming.texto == ""
 
 
+def test_twilio_parse_imagen_sin_caption_es_valida():
+    """Una foto de recibo sin texto NO se ignora: entra con media y texto vacío."""
+    adapter = WhatsAppTwilioAdapter("ACsid", "token", "+14155238886")
+    form = _form(texto="")
+    form.update(
+        {
+            "NumMedia": "1",
+            "MediaUrl0": "https://api.twilio.com/media/ME123",
+            "MediaContentType0": "image/jpeg",
+        }
+    )
+    incoming = adapter.parse(form)
+    assert incoming.telefono == "+50370000000"
+    assert incoming.texto == ""
+    assert len(incoming.media) == 1
+    assert incoming.media[0].content_type == "image/jpeg"
+    assert incoming.media[0].url == "https://api.twilio.com/media/ME123"
+    assert incoming.media[0].data_base64 is None  # se descarga en background
+    assert incoming.contenido_para_audit == "[imagen]"
+
+
+def test_twilio_parse_caption_mas_documento():
+    adapter = WhatsAppTwilioAdapter("ACsid", "token", "+14155238886")
+    form = _form(texto="mi estado de cuenta")
+    form.update(
+        {
+            "NumMedia": "1",
+            "MediaUrl0": "https://api.twilio.com/media/ME456",
+            "MediaContentType0": "application/pdf",
+        }
+    )
+    incoming = adapter.parse(form)
+    assert incoming.texto == "mi estado de cuenta"
+    assert incoming.media[0].es_pdf
+    assert incoming.contenido_para_audit == "mi estado de cuenta [documento PDF]"
+
+
 def test_twilio_from_agrega_prefijo_whatsapp():
     assert WhatsAppTwilioAdapter._to_whatsapp("+503700") == "whatsapp:+503700"
     assert WhatsAppTwilioAdapter._to_whatsapp("whatsapp:+503700") == "whatsapp:+503700"
@@ -114,6 +151,47 @@ def test_webhook_twilio_ignora_evento_sin_texto():
     )
     assert resp.status_code == 200
     assert process.preprocesados == []
+
+
+def test_webhook_twilio_mensaje_con_media_descarga_y_corre_agente():
+    """Con adjuntos, el background primero baja la media y después corre el
+    agente — el 200 no espera a ninguno de los dos."""
+
+    class ChannelConMedia(WhatsAppTwilioAdapter):
+        def __init__(self):
+            super().__init__("ACsid", "token", "+14155238886")
+            self.descargados: list = []
+
+        async def fetch_media(self, incoming):
+            self.descargados.append(incoming)
+
+    class Contexto:
+        def __init__(self, incoming):
+            self.incoming = incoming
+
+    channel = ChannelConMedia()
+
+    class ProcessConContexto(FakeProcess):
+        async def preprocess(self, incoming):
+            self.preprocesados.append(incoming)
+            return Contexto(incoming)
+
+    process = ProcessConContexto()
+    app = _app(process)
+    app.state.channel = channel
+
+    form = _form(texto="")
+    form.update(
+        {
+            "NumMedia": "1",
+            "MediaUrl0": "https://api.twilio.com/media/ME123",
+            "MediaContentType0": "image/jpeg",
+        }
+    )
+    resp = TestClient(app).post("/webhook/whatsapp", data=form)
+    assert resp.status_code == 200
+    assert len(channel.descargados) == 1  # fetch_media corrió en background
+    assert len(process.agentes) == 1  # y después el agente
 
 
 def test_webhook_twilio_rechaza_firma_invalida():

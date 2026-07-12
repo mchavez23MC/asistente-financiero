@@ -109,6 +109,10 @@ class ProcessMessage:
         loop (afectaría a otros usuarios, al scheduler y al panel)."""
         t0 = time.perf_counter()
 
+        # Un adjunto sin caption no trae texto: el guardrail y el audit trail
+        # trabajan sobre una descripción textual ('[imagen]', etc.).
+        contenido = incoming.contenido_para_audit
+
         # --- lectura de usuario y guardrail EN PARALELO (§7.3 / §7.5) ----------
         # El guardrail sigue resolviéndose antes de que nada llegue al agente;
         # solo se solapa con I/O que no depende de su veredicto.
@@ -116,14 +120,14 @@ class ProcessMessage:
             asyncio.to_thread(
                 self._repo.get_or_create_user, incoming.telefono, incoming.nombre_perfil
             ),
-            self._guardrail.classify(incoming.texto),
+            self._guardrail.classify(contenido),
         )
 
         # --- (0) consentimiento: primer contacto → aviso legal y nada más (§7.2)
         if not user.tiene_consentimiento:
             await asyncio.to_thread(
                 self._repo.save_message,
-                Message(user_id=user.id, rol=Rol.USUARIO, contenido=incoming.texto),
+                Message(user_id=user.id, rol=Rol.USUARIO, contenido=contenido),
             )
             user = await asyncio.to_thread(self._repo.registrar_consentimiento, user.id)
             await self._enviar_seguro(user, AVISO_LEGAL)
@@ -132,7 +136,7 @@ class ProcessMessage:
 
         mensaje = await asyncio.to_thread(
             self._repo.save_message,
-            Message(user_id=user.id, rol=Rol.USUARIO, contenido=incoming.texto),
+            Message(user_id=user.id, rol=Rol.USUARIO, contenido=contenido),
         )
         if veredicto.sensible:
             await self._escalar(user, incoming, veredicto, mensaje)

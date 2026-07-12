@@ -252,6 +252,54 @@ class Ticket(BaseModel):
 # ---------------------------------------------------------------------------
 # DTOs de frontera (no se persisten como tal; son el "formato canónico")
 # ---------------------------------------------------------------------------
+
+#: Tipos MIME que el agente puede procesar como visión/documento (Claude API).
+MEDIA_TIPOS_IMAGEN = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+MEDIA_TIPO_PDF = "application/pdf"
+
+#: Límites de tamaño (bytes) antes de base64 — el API de Anthropic rechaza
+#: imágenes > 5MB; el PDF se acota para no inflar el request.
+MEDIA_MAX_BYTES_IMAGEN = 5 * 1024 * 1024
+MEDIA_MAX_BYTES_PDF = 20 * 1024 * 1024
+
+
+class MediaItem(BaseModel):
+    """Adjunto de un mensaje entrante (imagen o documento).
+
+    El adaptador de canal llena `url` + `content_type` al parsear el webhook;
+    la descarga (que requiere las credenciales del canal) llena `data_base64`
+    después, en background. `data_base64 is None` = no descargado o falló.
+    """
+
+    content_type: str
+    url: Optional[str] = None
+    data_base64: Optional[str] = None
+    # Nombre del archivo si el canal lo provee (documentos).
+    filename: Optional[str] = None
+
+    @property
+    def es_imagen(self) -> bool:
+        return self.content_type in MEDIA_TIPOS_IMAGEN
+
+    @property
+    def es_pdf(self) -> bool:
+        return self.content_type == MEDIA_TIPO_PDF
+
+    @property
+    def soportado(self) -> bool:
+        """Solo imágenes y PDF llegan al modelo; audio/video/otros se declinan."""
+        return self.es_imagen or self.es_pdf
+
+    @property
+    def etiqueta(self) -> str:
+        """Descripción corta para el audit trail ('[imagen]', '[documento PDF]'…)."""
+        if self.es_imagen:
+            return "[imagen]"
+        if self.es_pdf:
+            return "[documento PDF]"
+        return f"[archivo {self.content_type}]"
+
+
 class IncomingMessage(BaseModel):
     """Formato canónico de mensaje entrante (§7.1 / §7.2).
 
@@ -264,8 +312,19 @@ class IncomingMessage(BaseModel):
     texto: str
     nombre_perfil: Optional[str] = None
     timestamp: datetime = Field(default_factory=_utcnow)
+    # Adjuntos (imágenes/documentos de WhatsApp). Vacío en mensajes solo-texto.
+    media: list[MediaItem] = Field(default_factory=list)
     # Payload crudo del canal, por si un adaptador necesita metadata extra.
     raw: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def contenido_para_audit(self) -> str:
+        """Texto que se persiste en `messages` (el binario nunca se guarda ahí):
+        el caption + una etiqueta por adjunto, o solo las etiquetas."""
+        etiquetas = " ".join(m.etiqueta for m in self.media)
+        if self.texto and etiquetas:
+            return f"{self.texto} {etiquetas}"
+        return self.texto or etiquetas
 
 
 class GuardrailResult(BaseModel):
