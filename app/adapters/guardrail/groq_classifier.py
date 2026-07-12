@@ -68,22 +68,41 @@ class GroqClassifier:
 
     async def classify(self, texto: str) -> GuardrailResult:
         """Una inferencia. Cualquier excepción o JSON inválido la maneja
-        LayeredGuardrail como fail-closed — aquí no se atrapa nada a propósito."""
+        LayeredGuardrail como fail-closed — aquí no se atrapa nada a propósito.
+
+        No se usa el `response_format=json_object` de Groq: con GPT-OSS
+        (razonamiento) su validación server-side de JSON falla de forma
+        intermitente con 400 'Failed to validate JSON'. Se pide JSON por prompt
+        y se extrae aquí, que es más robusto y nunca da ese 400."""
         resp = await self._client.chat.completions.create(
             model=self._model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": texto},
             ],
-            response_format={"type": "json_object"},
             reasoning_effort="low",
             temperature=0,
             max_tokens=1024,
         )
-        data = json.loads(resp.choices[0].message.content)
+        data = _extraer_json(resp.choices[0].message.content or "")
         return GuardrailResult(
             sensible=bool(data["sensible"]),
             categoria=str(data.get("categoria", "otro")),
             confianza=float(data.get("confianza", 0.0)),
             fuente="clasificador",
         )
+
+
+def _extraer_json(contenido: str) -> dict:
+    """Extrae el objeto JSON de la respuesta del modelo, tolerando texto o
+    razonamiento alrededor. Lanza ValueError si no hay JSON parseable
+    (LayeredGuardrail lo trata como fail-closed)."""
+    contenido = contenido.strip()
+    try:
+        return json.loads(contenido)
+    except json.JSONDecodeError:
+        pass
+    inicio, fin = contenido.find("{"), contenido.rfind("}")
+    if inicio != -1 and fin > inicio:
+        return json.loads(contenido[inicio : fin + 1])
+    raise ValueError(f"Respuesta del clasificador sin JSON: {contenido!r}")

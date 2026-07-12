@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from app.adapters.guardrail.denylist import match_denylist
+from app.adapters.guardrail.groq_classifier import _extraer_json
 from app.adapters.guardrail.layered import LayeredGuardrail
 from app.application.process_message import (
     RESPUESTA_FAIL_CLOSED,
@@ -54,6 +57,22 @@ def _ok(confianza: float = 0.95) -> GuardrailResult:
     return GuardrailResult(
         sensible=False, categoria="ninguna", confianza=confianza, fuente="clasificador"
     )
+
+
+# --- extractor de JSON (sin json_object mode de Groq) ----------------------------
+def test_extraer_json_limpio():
+    d = _extraer_json('{"sensible": false, "categoria": "gasto", "confianza": 0.9}')
+    assert d["sensible"] is False and d["categoria"] == "gasto"
+
+
+def test_extraer_json_con_texto_o_razonamiento_alrededor():
+    d = _extraer_json('Analicemos... la respuesta es {"sensible": true, "confianza": 0.3} listo')
+    assert d["sensible"] is True and d["confianza"] == 0.3
+
+
+def test_extraer_json_sin_json_lanza():
+    with pytest.raises((ValueError,)):
+        _extraer_json("no hay json aquí")
 
 
 # --- capa 1: denylist ------------------------------------------------------------
