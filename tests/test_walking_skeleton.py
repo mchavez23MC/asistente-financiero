@@ -49,6 +49,7 @@ class FakeRepo:
         self.tickets: dict[UUID, Ticket] = {}
         self.budgets: list[Budget] = []
         self.alerts: set[tuple] = set()
+        self.categories: set[str] = set()
 
     def get_or_create_user(self, telefono: str, nombre: Optional[str] = None) -> User:
         for u in self.users.values():
@@ -87,7 +88,19 @@ class FakeRepo:
         else:
             saved = transaction.model_copy(update={"id": uuid4()})
         self.transactions.append(saved)
+        if saved.categoria:
+            self.ensure_category(saved.categoria)
         return saved
+
+    def ensure_category(self, nombre: str) -> None:
+        nombre = (nombre or "").strip()
+        if nombre:
+            self.categories.add(nombre)
+
+    def get_categories(self) -> list:
+        from app.domain.models import Category
+
+        return [Category(nombre=n) for n in sorted(self.categories)]
 
     def get_pending_transaction(self, user_id: UUID) -> Optional[Transaction]:
         estado = "pendiente_confirmacion"

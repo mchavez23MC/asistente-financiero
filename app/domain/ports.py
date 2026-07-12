@@ -25,6 +25,7 @@ from app.domain.models import (
     AgentContext,
     AgentResult,
     Budget,
+    Category,
     GuardrailResult,
     IncomingMessage,
     LLMResponse,
@@ -145,6 +146,14 @@ class Repository(Protocol):
         ...
 
     def get_pending_transaction(self, user_id: UUID) -> Optional[Transaction]:
+        ...
+
+    # --- categorías (catálogo de T2) ---
+    def ensure_category(self, nombre: str) -> None:
+        """Registra la categoría en el catálogo si no existe (idempotente)."""
+        ...
+
+    def get_categories(self) -> list[Category]:
         ...
 
     # --- presupuesto (H2) — el sistema calcula; Claude explica (§1.2) ---

@@ -17,7 +17,7 @@ from uuid import UUID
 
 from supabase import Client, create_client
 
-from app.domain.models import Budget, Message, Ticket, Transaction, User
+from app.domain.models import Budget, Category, Message, Ticket, Transaction, User
 
 
 def _dump(model) -> dict:
@@ -89,7 +89,25 @@ class SupabaseRepository:
             )
         else:
             res = self._db.table("transactions").insert(data).execute()
-        return Transaction(**res.data[0])
+        guardada = Transaction(**res.data[0])
+        # Cataloga la categoría usada (§3.1: tabla categories de T2).
+        if guardada.categoria:
+            self.ensure_category(guardada.categoria)
+        return guardada
+
+    # --- categorías (catálogo de T2) ------------------------------------------
+    def ensure_category(self, nombre: str) -> None:
+        nombre = (nombre or "").strip()
+        if not nombre:
+            return
+        # Idempotente: `nombre` es UNIQUE; ignora si ya existe.
+        self._db.table("categories").upsert(
+            {"nombre": nombre}, on_conflict="nombre", ignore_duplicates=True
+        ).execute()
+
+    def get_categories(self) -> list[Category]:
+        res = self._db.table("categories").select("*").order("nombre").execute()
+        return [Category(**row) for row in res.data]
 
     def get_pending_transaction(self, user_id: UUID) -> Optional[Transaction]:
         res = (

@@ -88,6 +88,15 @@ async def test_registra_gasto_completo():
     assert tx.status == "confirmada" and tx.monto == Decimal("25")
 
 
+async def test_registrar_gasto_cataloga_la_categoria():
+    """La categoría usada queda registrada en el catálogo (tabla categories)."""
+    repo = FakeRepo()
+    llm = ScriptedLLM([_tool("registrar_gasto", {"monto": 25, "categoria": "comida"}), _texto("ok")])
+    await _agente(llm, repo).handle(_contexto(repo, "gasté 25 en comida"))
+    assert "comida" in repo.categories
+    assert [c.nombre for c in repo.get_categories()] == ["comida"]
+
+
 async def test_gasto_incompleto_queda_pendiente():
     repo = FakeRepo()
     llm = ScriptedLLM(

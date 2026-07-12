@@ -1,6 +1,6 @@
 # E5 — Fly.io (§3, §6). Las claves van con `fly secrets set`, nunca aquí.
 app = "e5-asistente-financiero"
-primary_region = "mia"
+primary_region = "dfw"
 
 [build]
 
