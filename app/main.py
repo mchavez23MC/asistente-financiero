@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.adapters.channels.whatsapp_twilio import WhatsAppTwilioAdapter
 from app.adapters.guardrail.groq_classifier import GroqClassifier
@@ -27,7 +29,7 @@ from app.application.process_message import ProcessMessage
 from app.application.router import InMemoryAgentRegistry
 from app.infra.config import Settings
 from app.infra.scheduler import crear_scheduler
-from app.interfaces.api import legal, panel, web_chat, webhook_twilio
+from app.interfaces.api import legal, panel, web_chat, webapp_api, webhook_twilio
 
 log = logging.getLogger("e5")
 
@@ -109,6 +111,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(panel.router)
     app.include_router(web_chat.router)
     app.include_router(legal.router)
+    app.include_router(webapp_api.router)
+
+    # Webapp de Luca (frontend estático, rama webapp). Montada al final: las
+    # rutas de la API (webhook, panel, /chat, /api, legales) tienen precedencia.
+    webapp_dir = Path(__file__).resolve().parents[1] / "webapp"
+    if webapp_dir.exists():
+        app.mount("/", StaticFiles(directory=webapp_dir, html=True), name="webapp")
     return app
 
 

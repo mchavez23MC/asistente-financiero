@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Presupuestos</title>
+  <link rel="stylesheet" href="../assets/css/tokens.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body>
+  <div class="layout">
+    <aside id="app-sidebar"></aside>
+    <div class="content">
+      <header id="app-topbar"></header>
+      <main class="page">
+        <div class="row-between mb-16">
+          <div>
+            <h1 class="t-h1">Presupuestos</h1>
+            <p class="muted t-label" id="budget-summary"></p>
+          </div>
+          <button class="btn btn--primary btn--sm" id="btn-new-budget">Nuevo presupuesto</button>
+        </div>
+
+        <div class="card mb-16">
+          <div class="row-between mb-8"><span class="t-label">Total del mes</span><span class="t-label luca-amount" id="total-txt"></span></div>
+          <div class="progress" style="height:10px"><div class="progress__fill" id="total-bar"></div></div>
+        </div>
+
+        <div class="grid grid-2" id="budget-grid"></div>
+      </main>
+    </div>
+  </div>
+  <nav id="app-bottomnav"></nav>
+
+  <!-- Drawer detalle presupuesto -->
+  <div class="drawer-overlay" id="bd-overlay"></div>
+  <aside class="drawer" id="bd-drawer" aria-label="Detalle de presupuesto">
+    <div class="drawer__head"><div class="drawer__title" id="bd-title">Presupuesto</div><div class="spacer"></div><button class="iconbtn" data-close="bd-drawer" id="bdc"></button></div>
+    <div class="drawer__body" id="bd-body"></div>
+    <div class="drawer__foot"><button class="btn btn--outline" id="bd-edit">Editar</button><div class="spacer"></div><button class="btn btn--ghost" id="bd-pause">Pausar</button></div>
+  </aside>
+
+  <!-- Modal crear/editar -->
+  <div class="overlay" id="bnew-overlay">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="row-between mb-16"><div class="modal__title" style="margin:0" id="bnew-title">Nuevo presupuesto</div><button class="iconbtn" data-close="bnew-overlay" id="bnc"></button></div>
+      <div class="field"><label class="field__label">Categoría</label><select class="select" id="bnew-cat"></select></div>
+      <div class="field"><label class="field__label">Límite mensual</label>
+        <div class="input-group"><span class="input-group__prefix">$</span><input class="input input-amount" id="bnew-limit" inputmode="decimal" placeholder="200.00"></div>
+        <div class="field__hint" id="bnew-hint"></div>
+      </div>
+      <div class="field"><label class="field__label">Avísame al <span id="th-val">80</span>%</label>
+        <input type="range" id="bnew-th" min="50" max="100" value="80" style="width:100%;accent-color:var(--luca-navy-600)">
+      </div>
+      <label class="check mb-16"><input type="checkbox" id="bnew-active" checked><span>Presupuesto activo</span></label>
+      <div class="modal__actions"><button class="btn btn--ghost" data-close="bnew-overlay">Cancelar</button><button class="btn btn--primary" id="bnew-save">Guardar</button></div>
+    </div>
+  </div>
+
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/api.js"></script>
+  <script src="../assets/js/ui.js"></script>
+  <script src="../assets/js/charts.js"></script>
+  <script src="../assets/js/shell.js"></script>
+  <script>
+    LUCA.shell({ active: 'presupuestos', title: 'Presupuestos' });
+    ['bdc','bnc'].forEach(function(id){ document.getElementById(id).innerHTML = LUCA.icon('x'); });
+    LUCA.ready(function () {
+    var budgets = LUCA.budgets.slice();
+    var curBudget = null;
+
+    document.getElementById('bnew-cat').innerHTML = Object.keys(LUCA.categories).filter(function (c) { return c !== 'TRANSFER' && !c.startsWith('SALARY') && !['FREELANCE','BUSINESS_SALES','REMITTANCE_SUPPORT','OTHER_INCOME'].includes(c); }).map(function (c) { return '<option value="' + c + '">' + LUCA.categories[c].emoji + ' ' + LUCA.categories[c].name + '</option>'; }).join('');
+
+    function render() {
+      var totLimit = budgets.reduce(function (a, b) { return a + b.limit; }, 0);
+      var totSpent = budgets.reduce(function (a, b) { return a + b.spent; }, 0);
+      document.getElementById('budget-summary').textContent = 'Este mes · ' + budgets.length + ' presupuesto' + (budgets.length === 1 ? '' : 's');
+      document.getElementById('total-txt').innerHTML = '<span class="luca-amount">' + LUCA.fmt(totSpent) + ' de ' + LUCA.fmt(totLimit) + '</span>';
+      var pct = totLimit > 0 ? totSpent / totLimit : 0;
+      var tb = document.getElementById('total-bar'); tb.style.width = Math.min(100, pct * 100) + '%'; tb.className = 'progress__fill' + (pct >= 1 ? ' is-over' : pct >= 0.8 ? ' is-warn' : '');
+
+      if (!budgets.length) {
+        document.getElementById('budget-grid').innerHTML = '<div class="card empty" style="grid-column:1/-1"><div class="empty__art">🎯</div><div class="empty__title">Aún no tienes presupuestos</div><div class="empty__text">Un presupuesto le dice a Luca cuándo avisarte. Crea el primero.</div><button class="btn btn--primary" onclick="LUCA.openModal(\'bnew-overlay\')">Crear presupuesto</button></div>';
+        return;
+      }
+      document.getElementById('budget-grid').innerHTML = budgets.map(function (b) {
+        var cat = LUCA.cat(b.code), pct = b.spent / b.limit, cls = pct >= 1 ? 'is-over' : pct >= b.threshold ? 'is-warn' : '';
+        var over = pct >= 1;
+        var state = over ? 'Superado por ' + LUCA.fmt(b.spent - b.limit) : 'Te quedan ' + LUCA.fmt(Math.max(0, b.limit - b.spent));
+        return '<div class="card" data-b="' + b.id + '" role="button" tabindex="0" style="cursor:pointer">' +
+          '<div class="row-between mb-12"><span class="row gap-8"><span class="cat-chip">' + cat.emoji + '</span><span class="t-h2" style="font-size:15px;font-weight:700">' + cat.name + '</span></span>' +
+          (over ? '<span class="badge badge--high"><span class="badge__dot"></span>Superado</span>' : pct >= b.threshold ? '<span class="badge badge--med"><span class="badge__dot"></span>Cerca</span>' : '') + '</div>' +
+          '<div class="row-between mb-8"><span class="amount-lg">' + LUCA.fmt(b.spent) + '</span><span class="muted t-label luca-amount">de ' + LUCA.fmt(b.limit) + '</span></div>' +
+          '<div class="progress"><div class="progress__fill ' + cls + '" style="width:' + Math.min(100, pct * 100) + '%"></div></div>' +
+          '<div class="muted t-micro mt-8">' + state + '</div></div>';
+      }).join('');
+      document.querySelectorAll('#budget-grid [data-b]').forEach(function (c) { c.addEventListener('click', function () { openDetail(c.dataset.b); }); });
+    }
+
+    function openDetail(id) {
+      var b = budgets.find(function (x) { return x.id === id; }); if (!b) return; curBudget = id;
+      var cat = LUCA.cat(b.code), pct = b.spent / b.limit;
+      document.getElementById('bd-title').textContent = cat.emoji + ' ' + cat.name;
+      // Proyección lineal con la fecha real: gastado / fracción del mes transcurrida.
+      var hoy = new Date(), dia = hoy.getDate(),
+          diasMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate();
+      var dayFrac = Math.max(dia / diasMes, 0.01), proj = b.spent / dayFrac;
+      var real = [0, b.spent * 0.3, b.spent * 0.6, b.spent];
+      var projected = [proj * 0.6, proj];
+      document.getElementById('bd-body').innerHTML =
+        '<div class="row-between mb-16"><span class="amount-xl">' + LUCA.fmt(b.spent) + '</span><span class="muted luca-amount">de ' + LUCA.fmt(b.limit) + '</span></div>' +
+        '<div class="progress mb-16" style="height:10px"><div class="progress__fill ' + (pct >= 1 ? 'is-over' : pct >= b.threshold ? 'is-warn' : '') + '" style="width:' + Math.min(100, pct * 100) + '%"></div></div>' +
+        '<div class="card mb-16"><div class="card__head"><span class="card__title">Acumulado y proyección</span></div>' + LUCA.projection(real, projected, b.limit) +
+        '<div class="muted t-micro mt-8">A este ritmo cerrarías el mes en ~' + LUCA.fmt(proj) + ' (día ' + dia + ' de ' + diasMes + ').</div></div>';
+      document.getElementById('bd-overlay').classList.add('is-open');
+      document.getElementById('bd-drawer').classList.add('is-open');
+    }
+    document.getElementById('bd-overlay').addEventListener('click', function () { this.classList.remove('is-open'); document.getElementById('bd-drawer').classList.remove('is-open'); });
+    document.getElementById('bd-edit').addEventListener('click', function () { document.getElementById('bd-drawer').classList.remove('is-open'); document.getElementById('bd-overlay').classList.remove('is-open'); openNew(curBudget); });
+    document.getElementById('bd-pause').addEventListener('click', function () { LUCA.toast('Presupuesto pausado'); });
+
+    // crear/editar
+    function openNew(id) {
+      var editing = !!id;
+      document.getElementById('bnew-title').textContent = editing ? 'Editar presupuesto' : 'Nuevo presupuesto';
+      if (editing) { var b = budgets.find(function (x) { return x.id === id; }); document.getElementById('bnew-cat').value = b.code; document.getElementById('bnew-limit').value = b.limit; document.getElementById('bnew-th').value = b.threshold * 100; document.getElementById('th-val').textContent = b.threshold * 100; }
+      else { document.getElementById('bnew-limit').value = ''; }
+      updateHint();
+      document.getElementById('bnew-save').dataset.edit = id || '';
+      LUCA.openModal('bnew-overlay');
+    }
+    function updateHint() {
+      // Promedio real de la categoría este mes (desde transacciones del backend).
+      var code = document.getElementById('bnew-cat').value;
+      var gastado = LUCA.transactions.reduce(function (a, t) {
+        return a + (t.status === 'CONFIRMED' && t.category === code && t.amount ? t.amount : 0);
+      }, 0);
+      document.getElementById('bnew-hint').textContent = gastado > 0
+        ? 'Este mes llevas ' + LUCA.fmt(gastado) + ' en esta categoría.'
+        : 'Luca te avisará al cruzar el umbral.';
+    }
+    document.getElementById('bnew-cat').addEventListener('change', updateHint);
+    document.getElementById('bnew-th').addEventListener('input', function () { document.getElementById('th-val').textContent = this.value; });
+    document.getElementById('btn-new-budget').addEventListener('click', function () { openNew(null); });
+    // Guardar contra el backend real (upsert por usuario+categoría+periodo).
+    document.getElementById('bnew-save').addEventListener('click', function () {
+      var limit = parseFloat(document.getElementById('bnew-limit').value);
+      if (!limit || limit <= 0) return LUCA.toast('Ingresa un límite válido', { type: 'error' });
+      var code = document.getElementById('bnew-cat').value, th = document.getElementById('bnew-th').value / 100;
+      LUCA.closeModal('bnew-overlay'); LUCA.toast('Guardando…');
+      fetch('/api/presupuestos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefono: LUCA.phone(), categoria: LUCA.catToBackend(code),
+                               monto_limite: limit, periodo: 'mensual', umbral_alerta: th })
+      }).then(function (r) { if (!r.ok) throw new Error('presupuesto ' + r.status); })
+        .then(function () { LUCA.toast('Presupuesto guardado ✅'); location.reload(); })
+        .catch(function () { LUCA.toast('No pude guardarlo, revisa el servidor', { type: 'error' }); });
+    });
+
+    render();
+    }); // LUCA.ready
+  </script>
+</body>
+</html>

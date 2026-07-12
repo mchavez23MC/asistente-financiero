@@ -110,8 +110,23 @@ class FakeRepo:
                 return t
         return None
 
+    def list_transactions(self, user_id: UUID, limit: int = 50) -> list[Transaction]:
+        propias = [t for t in self.transactions if t.user_id == user_id]
+        return sorted(propias, key=lambda t: t.created_at, reverse=True)[:limit]
+
     def get_budgets(self, user_id: UUID) -> list:
         return [b for b in self.budgets if b.user_id == user_id]
+
+    def save_budget(self, budget: Budget) -> Budget:
+        # Upsert por (user, categoria, periodo), como el UNIQUE del schema.
+        self.budgets = [
+            b for b in self.budgets
+            if not (b.user_id == budget.user_id and b.categoria == budget.categoria
+                    and b.periodo == budget.periodo)
+        ]
+        saved = budget.model_copy(update={"id": budget.id or uuid4()})
+        self.budgets.append(saved)
+        return saved
 
     def get_all_budgets(self) -> list:
         return list(self.budgets)

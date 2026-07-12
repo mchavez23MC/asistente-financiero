@@ -1,0 +1,110 @@
+/* ============================================================
+   LUCA — Design Tokens v1.0
+   Fuente de verdad: plan/entregables/E8-marca-ux.md
+   Contrastes verificados con fórmula WCAG 2.1 (AA mínimo)
+   Copia del design kit (design/tokens.css) — NO editar aquí; editar en el kit.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700&display=swap');
+
+:root {
+  /* ---------- Marca ---------- */
+  --luca-navy-900: #12233A;
+  --luca-navy:     #1F3A5F;
+  --luca-navy-600: #2E5A8F;
+  --luca-navy-300: #6FA0D6;
+  --luca-navy-100: #B5D4F4;
+  --luca-navy-50:  #E3ECF5;
+
+  --luca-gold:     #F5B301;
+  --luca-gold-700: #B8860B;
+  --luca-gold-50:  #FDF3D7;
+
+  /* ---------- Semánticos (dinero) ---------- */
+  --luca-income:      #0E7A50;
+  --luca-income-bg:   #E1F5EE;
+  --luca-income-text: #0F6E56;
+
+  --luca-alert:       #E8590C;
+  --luca-alert-text:  #C24A06;
+  --luca-alert-bg:    #FAECE7;
+
+  --luca-danger:      #C92A2A;
+  --luca-danger-bg:   #FCEBEB;
+
+  /* ---------- Neutros ---------- */
+  --luca-text:        #151A21;
+  --luca-text-2:      #5A6472;
+  --luca-border:      #E1E5EA;
+  --luca-bg:          #FFFFFF;
+  --luca-bg-2:        #F7F9FB;
+
+  /* ---------- Tipografía ---------- */
+  --luca-font: 'Manrope', system-ui, -apple-system, sans-serif;
+  --luca-fs-display: 28px;
+  --luca-fs-h1:      22px;
+  --luca-fs-h2:      18px;
+  --luca-fs-body:    16px;
+  --luca-fs-amount:  24px;
+  --luca-fs-label:   13px;
+  --luca-fs-micro:   11px;
+  --luca-lh: 1.5;
+
+  /* ---------- Forma y espacio ---------- */
+  --luca-radius-card:   12px;
+  --luca-radius-bubble: 14px;
+  --luca-radius-chip:   9px;
+  --luca-radius-pill:   20px;
+  --luca-space-1: 4px;
+  --luca-space-2: 8px;
+  --luca-space-3: 12px;
+  --luca-space-4: 16px;
+  --luca-space-6: 24px;
+  --luca-space-8: 32px;
+  --luca-border-w: 1px;
+}
+
+/* ---------- Modo oscuro (contrastes verificados) ---------- */
+[data-theme="dark"] {
+  --luca-navy:     #6FA0D6;
+  --luca-navy-600: #2E5A8F;
+  --luca-navy-50:  #22334A;
+
+  --luca-gold:     #F5B301;
+  --luca-gold-50:  #3A3012;
+
+  --luca-income:      #3DD68C;
+  --luca-income-bg:   #12332A;
+  --luca-income-text: #3DD68C;
+
+  --luca-alert:       #FF922B;
+  --luca-alert-text:  #FF922B;
+  --luca-alert-bg:    #3A2417;
+
+  --luca-danger:      #F06565;
+  --luca-danger-bg:   #3A1D1D;
+
+  --luca-text:        #E8EDF2;
+  --luca-text-2:      #9AA7B5;
+  --luca-border:      #2A3646;
+  --luca-bg:          #1A2433;
+  --luca-bg-2:        #0F1720;
+}
+
+/* ---------- Utilidades base ---------- */
+body {
+  font-family: var(--luca-font);
+  font-size: var(--luca-fs-body);
+  line-height: var(--luca-lh);
+  color: var(--luca-text);
+  background: var(--luca-bg-2);
+}
+
+/* REGLA DE ORO: todo monto, saldo o cifra financiera usa esta clase */
+.luca-amount {
+  font-feature-settings: 'tnum' 1;
+  font-weight: 500;
+}
+
+.luca-amount--income  { color: var(--luca-income); }
+.luca-amount--expense { color: var(--luca-text); }

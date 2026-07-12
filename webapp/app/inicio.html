@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Inicio</title>
+  <link rel="stylesheet" href="../assets/css/tokens.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body>
+  <div class="layout">
+    <aside id="app-sidebar"></aside>
+    <div class="content">
+      <header id="app-topbar"></header>
+      <main class="page">
+        <div id="greeting" class="mb-16"></div>
+
+        <!-- Banner de alerta -->
+        <div class="banner banner--alert mb-16" id="alert-banner">
+          <span id="ab-ico"></span>
+          <div><strong>Ojo con Restaurantes:</strong> vas $199.00 de $200.00 este mes.</div>
+          <div class="banner__actions">
+            <a class="btn btn--outline btn--sm" href="presupuestos.html">Ver</a>
+            <button class="iconbtn" id="ab-close" aria-label="Cerrar" style="width:30px;height:30px"></button>
+          </div>
+        </div>
+
+        <div class="grid grid-dash">
+          <!-- Columna principal -->
+          <div class="stack">
+            <!-- Héroe: flujo neto -->
+            <div class="card">
+              <div class="metric__label">Flujo neto · Julio 2026</div>
+              <div class="row-between mt-8">
+                <div>
+                  <div class="amount-xl" id="hero-net"></div>
+                  <div class="delta income mt-8" id="hero-delta"></div>
+                </div>
+                <div id="hero-spark"></div>
+              </div>
+              <div class="grid grid-2 mt-16">
+                <div class="card" style="background:var(--luca-bg-2)">
+                  <div class="metric__label">Ingresos</div>
+                  <div class="metric__value income" id="m-income"></div>
+                </div>
+                <div class="card" style="background:var(--luca-bg-2)">
+                  <div class="metric__label">Gastos</div>
+                  <div class="metric__value" id="m-expense"></div>
+                </div>
+              </div>
+              <p class="muted t-micro mt-12">El flujo neto no es tu saldo bancario: es ingresos menos gastos del mes.</p>
+            </div>
+
+            <!-- Ingresos vs gastos 6 meses -->
+            <div class="card">
+              <div class="card__head"><span class="card__title">Ingresos vs gastos</span><span class="muted t-label">Últimos 6 meses</span></div>
+              <div id="cashflow"></div>
+              <div class="row gap-16 mt-8 t-micro muted">
+                <span class="row gap-4"><span class="legend__dot" style="background:var(--luca-income)"></span>Ingresos</span>
+                <span class="row gap-4"><span class="legend__dot" style="background:var(--luca-navy-600)"></span>Gastos</span>
+                <span class="row gap-4"><span class="legend__dot" style="background:var(--luca-gold)"></span>Flujo neto</span>
+              </div>
+            </div>
+
+            <!-- Últimos movimientos -->
+            <div class="card">
+              <div class="card__head"><span class="card__title">Últimos movimientos</span><a class="card__link" href="movimientos.html">Ver todos</a></div>
+              <div id="recent-tx"></div>
+            </div>
+          </div>
+
+          <!-- Columna lateral -->
+          <div class="stack">
+            <!-- Donut categorías -->
+            <div class="card">
+              <div class="card__head"><span class="card__title">Gasto por categoría</span></div>
+              <div class="center mb-16" id="donut"></div>
+              <div class="legend" id="donut-legend"></div>
+            </div>
+
+            <!-- Presupuestos top -->
+            <div class="card">
+              <div class="card__head"><span class="card__title">Presupuestos</span><a class="card__link" href="presupuestos.html">Ver todos</a></div>
+              <div class="stack" id="budgets-mini" style="gap:14px"></div>
+            </div>
+
+            <!-- Insights recientes -->
+            <div class="card">
+              <div class="card__head"><span class="card__title">Luca detectó</span><a class="card__link" href="insights.html">Ver todo</a></div>
+              <div class="stack" id="insights-mini" style="gap:12px"></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <nav id="app-bottomnav"></nav>
+
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/api.js"></script>
+  <script src="../assets/js/ui.js"></script>
+  <script src="../assets/js/charts.js"></script>
+  <script src="../assets/js/shell.js"></script>
+  <script>
+    LUCA.shell({ active: 'inicio', title: 'Inicio' });
+    LUCA.ready(function () {
+    var s = LUCA.monthSummary;
+
+    document.getElementById('greeting').innerHTML = '<h1 class="t-h1">Hola, ' + LUCA.user.name + ' 👋</h1><p class="muted">Esto es lo que va del mes.</p>';
+    document.getElementById('ab-ico').innerHTML = LUCA.icon('alert');
+    document.getElementById('ab-close').innerHTML = LUCA.icon('x');
+    document.getElementById('ab-close').addEventListener('click', function () { document.getElementById('alert-banner').classList.add('hide'); });
+
+    // Banner: primera alerta real de presupuesto, o se oculta si no hay.
+    var alerta = (LUCA.insights || []).filter(function (i) { return i.severity === 'alert'; })[0];
+    if (alerta) {
+      document.getElementById('alert-banner').querySelector('div').innerHTML =
+        '<strong>' + alerta.title + ':</strong> ' + alerta.body;
+    } else {
+      document.getElementById('alert-banner').classList.add('hide');
+    }
+
+    document.getElementById('hero-net').innerHTML = '<span class="luca-amount">' + LUCA.fmt(s.expenses) + '</span>';
+    document.getElementById('hero-net').closest('.card').querySelector('.metric__label').textContent = 'Gastado este mes';
+    document.getElementById('hero-delta').innerHTML = '';
+    document.getElementById('hero-spark').innerHTML = '';
+    document.getElementById('m-income').textContent = '—';
+    document.getElementById('m-expense').textContent = LUCA.fmt(s.expenses);
+
+    // Cash flow de 6 meses requiere histórico de ingresos (roadmap H1): oculto.
+    document.getElementById('cashflow').closest('.card').style.display = 'none';
+
+    // donut
+    var bd = LUCA.categoryBreakdown.map(function (c) { return { label: LUCA.cat(c.code).name, value: c.amount, color: c.color }; });
+    document.getElementById('donut').innerHTML = LUCA.donut(bd, { centerLabel: 'Gastado', size: 180 });
+    var total = bd.reduce(function (a, c) { return a + c.value; }, 0);
+    document.getElementById('donut-legend').innerHTML = LUCA.categoryBreakdown.map(function (c) {
+      var cat = LUCA.cat(c.code);
+      return '<a class="legend__item" href="movimientos.html">' +
+        '<span class="legend__dot" style="background:' + c.color + '"></span>' +
+        '<span class="legend__name">' + cat.emoji + ' ' + cat.name + '</span>' +
+        '<span class="legend__val luca-amount">' + LUCA.fmt(c.amount) + '</span>' +
+        '<span class="legend__pct">' + Math.round(c.amount / total * 100) + '%</span></a>';
+    }).join('');
+
+    // presupuestos mini (top 3 por uso)
+    var top = LUCA.budgets.slice().sort(function (a, b) { return (b.spent / b.limit) - (a.spent / a.limit); }).slice(0, 3);
+    document.getElementById('budgets-mini').innerHTML = top.map(function (b) {
+      var cat = LUCA.cat(b.code), pct = b.spent / b.limit, cls = pct >= 1 ? 'is-over' : pct >= b.threshold ? 'is-warn' : '';
+      return '<div><div class="row-between mb-8"><span class="t-label">' + cat.emoji + ' ' + cat.name + '</span>' +
+        '<span class="t-label luca-amount">' + LUCA.fmt(b.spent) + ' / ' + LUCA.fmt(b.limit) + '</span></div>' +
+        '<div class="progress"><div class="progress__fill ' + cls + '" style="width:' + Math.min(100, pct * 100) + '%"></div></div></div>';
+    }).join('');
+
+    // insights mini
+    document.getElementById('insights-mini').innerHTML = LUCA.insights.slice(0, 3).map(function (i) {
+      var ic = i.severity === 'alert' ? 'alert' : 'sparkles';
+      var col = i.severity === 'alert' ? 'var(--luca-alert-text)' : 'var(--luca-navy)';
+      return '<a class="row gap-8" href="insights.html" style="text-decoration:none;color:inherit;align-items:flex-start">' +
+        '<span style="color:' + col + ';flex-shrink:0">' + LUCA.icon(ic) + '</span>' +
+        '<span><span class="t-label">' + i.title + '</span><div class="muted t-micro">' + i.body + '</div></span></a>';
+    }).join('');
+
+    // últimos movimientos
+    var recent = LUCA.transactions.filter(function (t) { return t.status === 'CONFIRMED'; }).slice(0, 6);
+    document.getElementById('recent-tx').innerHTML = recent.map(function (t) {
+      var cat = LUCA.cat(t.category);
+      var amtCls = t.type === 'INCOME' || t.type === 'REFUND' ? 'income' : '';
+      return '<div class="tx-row"><div class="cat-chip">' + cat.emoji + '</div>' +
+        '<div class="tx-row__main"><div class="tx-row__title">' + (t.merchant || t.desc) + '</div>' +
+        '<div class="tx-row__meta">' + cat.name + ' · ' + LUCA.relDate(t.date) + '</div></div>' +
+        '<div class="tx-row__amt ' + amtCls + '">' + LUCA.signed(t.type, t.amount) + '</div></div>';
+    }).join('') || '<p class="muted t-label">Aún no hay movimientos. Cuéntale un gasto a Luca en el <a href="chat.html">chat</a>.</p>';
+    }); // LUCA.ready
+  </script>
+</body>
+</html>

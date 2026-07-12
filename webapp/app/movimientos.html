@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Movimientos</title>
+  <link rel="stylesheet" href="../assets/css/tokens.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body>
+  <div class="layout">
+    <aside id="app-sidebar"></aside>
+    <div class="content">
+      <header id="app-topbar"></header>
+      <main class="page">
+        <div class="row-between mb-16 wrap gap-8">
+          <div class="segmented" id="subtabs">
+            <button class="is-on" data-tab="all">Todos</button>
+            <button data-tab="pending">Por confirmar (3)</button>
+          </div>
+          <div class="row gap-8">
+            <button class="btn btn--outline btn--sm" id="btn-import">Importar CSV</button>
+            <button class="btn btn--primary btn--sm" id="btn-new">Nuevo</button>
+          </div>
+        </div>
+
+        <!-- Vista TODOS -->
+        <section id="view-all">
+          <!-- Filtros -->
+          <div class="card mb-16">
+            <div class="row wrap gap-8">
+              <div class="segmented">
+                <button class="is-on" data-range>Este mes</button>
+                <button data-range>Mes pasado</button>
+                <button data-range>30 días</button>
+              </div>
+              <select class="select" id="f-cat" style="width:auto;flex:1;min-width:160px">
+                <option value="">Todas las categorías</option>
+              </select>
+              <select class="select" id="f-type" style="width:auto">
+                <option value="">Todo tipo</option>
+                <option value="EXPENSE">Gastos</option>
+                <option value="INCOME">Ingresos</option>
+                <option value="REFUND">Reembolsos</option>
+                <option value="TRANSFER">Transferencias</option>
+              </select>
+              <div class="input-group" style="flex:1;min-width:180px">
+                <span class="input-group__prefix" id="search-ico"></span>
+                <input class="input" id="f-search" placeholder="Buscar comercio o nota…">
+              </div>
+            </div>
+          </div>
+
+          <div class="card card--pad0" style="padding:0 18px">
+            <div id="tx-list"></div>
+          </div>
+          <div class="row-between card mt-16" style="background:var(--luca-bg-2)">
+            <span class="t-label muted">Total del filtro</span>
+            <span id="filter-total" class="amount-lg"></span>
+          </div>
+        </section>
+
+        <!-- Vista POR CONFIRMAR (bandeja) -->
+        <section id="view-pending" class="hide">
+          <div id="pending-wrap"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <nav id="app-bottomnav"></nav>
+
+  <!-- Drawer detalle -->
+  <div class="drawer-overlay" id="detail-overlay"></div>
+  <aside class="drawer" id="detail-drawer" aria-label="Detalle de movimiento">
+    <div class="drawer__head">
+      <div class="drawer__title">Detalle</div>
+      <div class="spacer"></div>
+      <button class="iconbtn" data-close="detail-drawer" id="dc1"></button>
+    </div>
+    <div class="drawer__body" id="detail-body"></div>
+    <div class="drawer__foot">
+      <button class="btn btn--outline" id="d-recat">Recategorizar</button>
+      <button class="btn btn--outline" id="d-edit">Editar</button>
+      <div class="spacer"></div>
+      <button class="btn btn--danger" id="d-delete"></button>
+    </div>
+  </aside>
+
+  <!-- Modal nuevo/editar -->
+  <div class="overlay" id="new-overlay">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="row-between mb-16"><div class="modal__title" style="margin:0" id="new-title">Nuevo movimiento</div><button class="iconbtn" data-close="new-overlay" id="nc1"></button></div>
+      <div class="segmented mb-16" id="new-type">
+        <button class="is-on" data-t="EXPENSE">Gasto</button><button data-t="INCOME">Ingreso</button>
+        <button data-t="TRANSFER">Transferencia</button><button data-t="REFUND">Reembolso</button>
+      </div>
+      <div class="field"><label class="field__label">Monto</label>
+        <div class="input-group"><span class="input-group__prefix">$</span><input class="input input-amount" id="new-amount" inputmode="decimal" placeholder="0.00"></div>
+      </div>
+      <div class="field"><label class="field__label">Categoría</label><select class="select" id="new-cat"></select></div>
+      <div class="grid grid-2">
+        <div class="field"><label class="field__label">Fecha</label><input class="input" id="new-date" type="date" value="2026-07-11"></div>
+        <div class="field"><label class="field__label">Método</label><select class="select" id="new-method"></select></div>
+      </div>
+      <div class="field"><label class="field__label">Comercio <span class="muted">(opcional)</span></label><input class="input" id="new-merchant" placeholder="Ej: Supermaxi"></div>
+      <div class="banner banner--info t-label"><span id="tip-ico"></span> Más rápido: escríbelo en el <a href="chat.html">chat</a>.</div>
+      <div class="modal__actions"><button class="btn btn--ghost" data-close="new-overlay">Cancelar</button><button class="btn btn--primary" id="new-save">Guardar</button></div>
+    </div>
+  </div>
+
+  <!-- Modal recategorizar -->
+  <div class="overlay" id="cat-overlay">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="row-between mb-16"><div class="modal__title" style="margin:0">Cambiar categoría</div><button class="iconbtn" data-close="cat-overlay" id="cc1"></button></div>
+      <div class="grid grid-3" id="cat-grid" style="gap:8px"></div>
+    </div>
+  </div>
+
+  <!-- Modal eliminar -->
+  <div class="overlay" id="del-overlay">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal__title">¿Eliminar este movimiento?</div>
+      <div class="modal__text" id="del-text">Se quitará de tu resumen. Podrás deshacerlo.</div>
+      <div class="modal__actions"><button class="btn btn--ghost" data-close="del-overlay">Cancelar</button><button class="btn btn--danger" id="del-confirm">Eliminar</button></div>
+    </div>
+  </div>
+
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/api.js"></script>
+  <script src="../assets/js/ui.js"></script>
+  <script src="../assets/js/shell.js"></script>
+  <script>
+    LUCA.shell({ active: 'movimientos', title: 'Movimientos' });
+    document.getElementById('search-ico').innerHTML = LUCA.icon('search');
+    document.getElementById('tip-ico').innerHTML = LUCA.icon('sparkles');
+    ['dc1','nc1','cc1'].forEach(function(id){ document.getElementById(id).innerHTML = LUCA.icon('x'); });
+    document.getElementById('d-delete').innerHTML = LUCA.icon('trash') + 'Eliminar';
+
+    LUCA.ready(function () {
+    var confirmed = LUCA.transactions.filter(function (t) { return t.status === 'CONFIRMED'; });
+    var pending = LUCA.transactions.filter(function (t) { return t.status === 'PENDING_CONFIRMATION'; });
+    var curType = 'EXPENSE', curTxId = null;
+
+    // poblar selects de categoría
+    function catOptions() {
+      return Object.keys(LUCA.categories).filter(function(c){return c!=='TRANSFER';}).map(function (c) { return '<option value="' + c + '">' + LUCA.categories[c].emoji + ' ' + LUCA.categories[c].name + '</option>'; }).join('');
+    }
+    document.getElementById('f-cat').innerHTML = '<option value="">Todas las categorías</option>' + catOptions();
+    document.getElementById('new-cat').innerHTML = catOptions();
+    document.getElementById('new-method').innerHTML = Object.keys(LUCA.paymentMethods).map(function (m) { return '<option value="' + m + '">' + LUCA.paymentMethods[m] + '</option>'; }).join('');
+
+    // ---- Lista agrupada por día ----
+    function renderList() {
+      var cat = document.getElementById('f-cat').value, type = document.getElementById('f-type').value, q = document.getElementById('f-search').value.toLowerCase();
+      var rows = confirmed.filter(function (t) {
+        if (cat && t.category !== cat) return false;
+        if (type && t.type !== type) return false;
+        if (q && !((t.merchant || '') + ' ' + t.desc).toLowerCase().includes(q)) return false;
+        return true;
+      });
+      var byDay = {};
+      rows.forEach(function (t) { (byDay[t.date] = byDay[t.date] || []).push(t); });
+      var days = Object.keys(byDay).sort().reverse();
+      var html = days.map(function (d) {
+        var items = byDay[d], sum = items.reduce(function (a, t) { return a + (t.type === 'EXPENSE' ? t.amount : t.type === 'INCOME' || t.type === 'REFUND' ? -t.amount : 0); }, 0);
+        return '<div class="tx-day"><span>' + LUCA.relDate(d) + '</span><span class="luca-amount">' + (sum >= 0 ? '−' : '+') + LUCA.fmt(Math.abs(sum)) + '</span></div>' +
+          items.map(txRow).join('');
+      }).join('');
+      document.getElementById('tx-list').innerHTML = html || '<div class="empty"><div class="empty__art">🔍</div><div class="empty__text">No hay movimientos con esos filtros.</div></div>';
+      var total = rows.reduce(function (a, t) { return a + (t.type === 'EXPENSE' ? t.amount : t.type === 'INCOME' || t.type === 'REFUND' ? -t.amount : 0); }, 0);
+      document.getElementById('filter-total').innerHTML = '<span class="luca-amount">' + (total >= 0 ? '−' : '+') + LUCA.fmt(Math.abs(total)) + '</span>';
+    }
+    function txRow(t) {
+      var cat = LUCA.cat(t.category), amtCls = (t.type === 'INCOME' || t.type === 'REFUND') ? 'income' : '';
+      var dup = t.flag === 'duplicate' ? ' <span class="tag" style="background:var(--luca-alert-bg);color:var(--luca-alert-text)">posible duplicado</span>' : '';
+      return '<div class="tx-row" data-id="' + t.id + '" role="button" tabindex="0"><div class="cat-chip">' + cat.emoji + '</div>' +
+        '<div class="tx-row__main"><div class="tx-row__title">' + (t.merchant || t.desc) + dup + '</div>' +
+        '<div class="tx-row__meta">' + cat.name + ' · ' + (LUCA.paymentMethods[t.method] || '—') + (t.time ? ' · ' + t.time : '') + '</div></div>' +
+        '<div class="tx-row__amt ' + amtCls + '">' + LUCA.signed(t.type, t.amount) + '</div></div>';
+    }
+    document.getElementById('tx-list').addEventListener('click', function (e) {
+      var row = e.target.closest('.tx-row'); if (row) openDetail(row.dataset.id);
+    });
+    ['f-cat', 'f-type'].forEach(function (id) { document.getElementById(id).addEventListener('change', renderList); });
+    document.getElementById('f-search').addEventListener('input', renderList);
+
+    // ---- Detalle (drawer) ----
+    function openDetail(id) {
+      var t = LUCA.transactions.find(function (x) { return x.id === id; }); if (!t) return;
+      curTxId = id;
+      var cat = LUCA.cat(t.category), amtCls = (t.type === 'INCOME' || t.type === 'REFUND') ? 'income' : '';
+      var typeLabel = { EXPENSE: 'Gasto', INCOME: 'Ingreso', REFUND: 'Reembolso', TRANSFER: 'Transferencia' }[t.type];
+      document.getElementById('detail-body').innerHTML =
+        '<div class="center mb-24"><div class="cat-chip" style="width:56px;height:56px;font-size:26px;margin:0 auto 10px">' + cat.emoji + '</div>' +
+        '<div class="amount-xl ' + amtCls + '">' + LUCA.signed(t.type, t.amount) + '</div>' +
+        '<div class="muted t-label mt-8">' + typeLabel + ' · ' + cat.name + '</div></div>' +
+        detailRow('Comercio', t.merchant || '—') +
+        detailRow('Fecha', LUCA.relDate(t.date) + ' (' + t.date + ')') +
+        detailRow('Método de pago', LUCA.paymentMethods[t.method] || '—') +
+        detailRow('Fuente', { CHAT: 'Chat', CSV: 'CSV importado', MANUAL: 'Manual', API: 'API' }[t.source]) +
+        '<div class="card mt-16" style="background:var(--luca-bg-2)"><div class="t-label muted mb-8">Texto original</div><div>"' + t.desc + '"</div></div>' +
+        (t.confidence ? '<div class="mt-16"><div class="row-between t-label mb-8"><span class="muted">Luca lo clasificó con</span><span>' + Math.round(t.confidence * 100) + '% de seguridad</span></div><div class="progress"><div class="progress__fill" style="width:' + (t.confidence * 100) + '%"></div></div></div>' : '') +
+        (t.related ? '<div class="banner banner--info mt-16 t-label">Reembolso vinculado a otro movimiento.</div>' : '');
+      document.getElementById('detail-overlay').classList.add('is-open');
+      document.getElementById('detail-drawer').classList.add('is-open');
+    }
+    function detailRow(k, v) { return '<div class="row-between" style="padding:10px 0;border-bottom:1px solid var(--luca-border)"><span class="muted t-label">' + k + '</span><span>' + v + '</span></div>'; }
+    function closeDetail() { document.getElementById('detail-overlay').classList.remove('is-open'); document.getElementById('detail-drawer').classList.remove('is-open'); }
+    document.getElementById('detail-overlay').addEventListener('click', closeDetail);
+
+    document.getElementById('d-delete').addEventListener('click', function () { LUCA.openModal('del-overlay'); });
+    document.getElementById('d-recat').addEventListener('click', openCatModal);
+    document.getElementById('d-edit').addEventListener('click', function () { closeDetail(); LUCA.toast('Edición: usa el formulario de Nuevo (demo)', { type: 'info' }); });
+
+    // eliminar con deshacer
+    document.getElementById('del-confirm').addEventListener('click', function () {
+      LUCA.closeModal('del-overlay'); closeDetail();
+      var removed = curTxId;
+      confirmed = confirmed.filter(function (t) { return t.id !== removed; });
+      renderList();
+      LUCA.toast('Movimiento eliminado', { action: 'Deshacer', duration: 5000, onAction: function () { confirmed = LUCA.transactions.filter(function (t) { return t.status === 'CONFIRMED'; }); renderList(); LUCA.toast('Restaurado'); } });
+    });
+
+    // recategorizar
+    function openCatModal() {
+      document.getElementById('cat-grid').innerHTML = Object.keys(LUCA.categories).filter(function(c){return c!=='TRANSFER';}).map(function (c) {
+        return '<button class="card center" data-cat="' + c + '" style="padding:12px 6px;cursor:pointer"><div style="font-size:22px">' + LUCA.categories[c].emoji + '</div><div class="t-micro mt-8">' + LUCA.categories[c].name + '</div></button>';
+      }).join('');
+      LUCA.openModal('cat-overlay');
+    }
+    document.getElementById('cat-grid').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-cat]'); if (!b) return;
+      var t = LUCA.transactions.find(function (x) { return x.id === curTxId; });
+      if (t) { t.category = b.dataset.cat; t.status = 'CORRECTED'; }
+      LUCA.closeModal('cat-overlay'); renderList(); LUCA.toast('Categoría actualizada'); openDetail(curTxId);
+    });
+
+    // ---- Bandeja Por confirmar ----
+    var pIdx = 0;
+    function renderPending() {
+      var wrap = document.getElementById('pending-wrap');
+      if (pIdx >= pending.length) {
+        wrap.innerHTML = '<div class="empty"><div class="empty__art">🎯</div><div class="empty__title">¡Todo al día!</div><div class="empty__text">No te queda nada por confirmar. Luca ya tiene tus cuentas claras.</div></div>';
+        var badge = document.querySelector('.nav-item__badge'); if (badge) badge.remove();
+        return;
+      }
+      var t = pending[pIdx], cat = LUCA.cat(t.category);
+      wrap.innerHTML =
+        '<div class="center muted t-label mb-16">' + (pIdx + 1) + ' de ' + pending.length + '</div>' +
+        '<div class="card" style="max-width:440px;margin:0 auto">' +
+        '<div class="card mb-16" style="background:var(--luca-bg-2)"><div class="t-label muted mb-8">Escribiste</div>"' + t.desc + '"</div>' +
+        '<div class="row gap-8 mb-16"><div class="cat-chip">' + cat.emoji + '</div><div><div class="t-label">Luca entendió</div>' +
+        '<div class="muted t-micro">' + cat.name + (t.amount ? ' · ' + LUCA.fmt(t.amount) : '') + (t.confidence ? ' · ' + Math.round(t.confidence * 100) + '% seguridad' : '') + '</div></div></div>' +
+        (t.needs && t.question ? '<div class="banner banner--alert mb-16 t-label"><span>' + LUCA.icon('info') + '</span>' + t.question + '</div>' +
+          (t.amount === null ? '<div class="input-group mb-16"><span class="input-group__prefix">$</span><input class="input input-amount" id="p-amount" placeholder="0.00"></div>' : '') : '') +
+        '<div class="row gap-8"><button class="btn btn--primary" id="p-confirm" style="flex:1">' + LUCA.icon('check') + 'Confirmar</button>' +
+        '<button class="btn btn--outline" id="p-recat">Categoría</button>' +
+        '<button class="iconbtn" id="p-del" style="width:44px;height:44px"></button></div></div>';
+      document.getElementById('p-del').innerHTML = LUCA.icon('trash');
+      // Confirmar: si falta el monto, se completa por el MISMO pipeline real
+      // (loop de confirmación de H1: el agente cierra la transacción pendiente).
+      document.getElementById('p-confirm').addEventListener('click', function () {
+        var inp = document.getElementById('p-amount');
+        if (t.amount === null && inp && inp.value) {
+          LUCA.toast('Enviando a Luca…');
+          LUCA.sendChat('El monto fue ' + inp.value + ' dólares')
+            .then(function () { LUCA.toast('Confirmado por Luca ✅'); location.reload(); })
+            .catch(function () { LUCA.toast('No pude confirmar, intenta por el chat', { type: 'error' }); });
+          return;
+        }
+        pIdx++; renderPending(); LUCA.toast('Confirmado'); updateBadge();
+      });
+      document.getElementById('p-del').addEventListener('click', function () { pIdx++; renderPending(); LUCA.toast('Descartado'); updateBadge(); });
+      document.getElementById('p-recat').addEventListener('click', function () { LUCA.toast('Dile la categoría a Luca en el chat 😉', { type: 'info' }); });
+    }
+    function updateBadge() {
+      var left = pending.length - pIdx;
+      document.querySelectorAll('[data-tab="pending"]').forEach(function (b) { b.textContent = 'Por confirmar (' + Math.max(0, left) + ')'; });
+    }
+
+    // ---- Sub-tabs ----
+    document.getElementById('subtabs').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-tab]'); if (!b) return;
+      document.querySelectorAll('#subtabs button').forEach(function (x) { x.classList.remove('is-on'); }); b.classList.add('is-on');
+      var pend = b.dataset.tab === 'pending';
+      document.getElementById('view-all').classList.toggle('hide', pend);
+      document.getElementById('view-pending').classList.toggle('hide', !pend);
+      if (pend) renderPending();
+    });
+    document.querySelectorAll('#view-all [data-range]').forEach(function(b){ b.parentElement.addEventListener('click', function(e){ var x=e.target.closest('[data-range]'); if(!x)return; this.querySelectorAll('button').forEach(function(y){y.classList.remove('is-on');}); x.classList.add('is-on'); }); });
+
+    // ---- Nuevo movimiento ----
+    document.getElementById('btn-new').addEventListener('click', function () { LUCA.openModal('new-overlay'); });
+    document.getElementById('btn-import').addEventListener('click', function () { LUCA.toast('Importar CSV: wizard de 3 pasos (demo)', { type: 'info' }); });
+    document.getElementById('new-type').addEventListener('click', function (e) { var b = e.target.closest('[data-t]'); if (!b) return; this.querySelectorAll('button').forEach(function (x) { x.classList.remove('is-on'); }); b.classList.add('is-on'); curType = b.dataset.t; });
+    // Nuevo movimiento: el formulario arma la frase y la registra el MISMO
+    // pipeline real que el chat (agente + tools) — una sola fuente de verdad.
+    document.getElementById('new-save').addEventListener('click', function () {
+      var amt = parseFloat(document.getElementById('new-amount').value);
+      if (!amt || amt <= 0) return LUCA.toast('Ingresa un monto válido', { type: 'error' });
+      var catCode = document.getElementById('new-cat').value;
+      var catName = (LUCA.categories[catCode] || {}).name || catCode;
+      var comercio = document.getElementById('new-merchant').value;
+      var frase = 'Gasté ' + amt + ' dólares en ' + catName.toLowerCase() +
+                  (comercio ? ' en ' + comercio : '') +
+                  ' el ' + document.getElementById('new-date').value;
+      LUCA.closeModal('new-overlay'); LUCA.toast('Registrando con Luca…');
+      LUCA.sendChat(frase)
+        .then(function () { LUCA.toast('Movimiento guardado ✅'); location.reload(); })
+        .catch(function () { LUCA.toast('No pude guardarlo, intenta por el chat', { type: 'error' }); });
+    });
+
+    renderList(); updateBadge();
+    if (location.hash === '#pending') document.querySelector('[data-tab="pending"]').click();
+    }); // LUCA.ready
+  </script>
+</body>
+</html>

@@ -148,6 +148,10 @@ class Repository(Protocol):
     def get_pending_transaction(self, user_id: UUID) -> Optional[Transaction]:
         ...
 
+    def list_transactions(self, user_id: UUID, limit: int = 50) -> list[Transaction]:
+        """Movimientos del usuario, más recientes primero (vista web)."""
+        ...
+
     # --- categorías (catálogo de T2) ---
     def ensure_category(self, nombre: str) -> None:
         """Registra la categoría en el catálogo si no existe (idempotente)."""
@@ -158,6 +162,10 @@ class Repository(Protocol):
 
     # --- presupuesto (H2) — el sistema calcula; Claude explica (§1.2) ---
     def get_budgets(self, user_id: UUID) -> list[Budget]:
+        ...
+
+    def save_budget(self, budget: Budget) -> Budget:
+        """Crea o actualiza el presupuesto de (user, categoría, periodo)."""
         ...
 
     def sum_gastos(

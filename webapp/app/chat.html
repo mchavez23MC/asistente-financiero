@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Chat</title>
+  <link rel="stylesheet" href="../assets/css/tokens.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body>
+  <div class="layout">
+    <aside id="app-sidebar"></aside>
+    <div class="content">
+      <header id="app-topbar"></header>
+      <div class="chat">
+        <div class="chat__head">
+          <div class="avatar avatar--gold">L</div>
+          <div><div class="chat__name">Luca</div><div class="chat__sub" id="chat-sub">tu plata, clara</div></div>
+        </div>
+        <div class="chat__body" id="chat-body"><div class="chat__scroll-inner" id="chat-inner"></div></div>
+        <div class="chat__foot">
+          <form class="chat__foot-inner" id="chat-form">
+            <input class="chat__input" id="chat-input" placeholder="Escríbele a Luca…" autocomplete="off">
+            <button class="chat__send" type="submit" aria-label="Enviar" id="send-btn"></button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  <nav id="app-bottomnav"></nav>
+
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/api.js"></script>
+  <script src="../assets/js/ui.js"></script>
+  <script src="../assets/js/shell.js"></script>
+  <script>
+    // Chat REAL: cada mensaje va por POST /api/chat al mismo pipeline que
+    // WhatsApp (consentimiento → guardrail fail-closed → agente Claude con tools).
+    LUCA.requirePhone();
+    LUCA.shell({ active: 'chat', title: 'Chat con Luca' });
+    document.getElementById('send-btn').innerHTML = LUCA.icon('send');
+    var inner = document.getElementById('chat-inner'), body = document.getElementById('chat-body');
+    function scrollDown() { body.scrollTop = body.scrollHeight; }
+    function time() { return new Date().toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' }); }
+    function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function addUser(text) {
+      var el = document.createElement('div'); el.className = 'bubble bubble--user';
+      el.innerHTML = esc(text) + '<div class="bubble__time">' + time() + '</div>';
+      inner.appendChild(el); scrollDown();
+    }
+    function addBot(html, opts) {
+      opts = opts || {};
+      var el = document.createElement('div'); el.className = 'bubble bubble--bot';
+      el.innerHTML = html + (opts.noTime ? '' : '<div class="bubble__time">' + time() + '</div>');
+      inner.appendChild(el); scrollDown();
+    }
+    var typingEl = null;
+    function typingOn() {
+      var sub = document.getElementById('chat-sub'); sub.textContent = 'escribiendo…';
+      typingEl = document.createElement('div'); typingEl.className = 'bubble bubble--bot typing';
+      typingEl.innerHTML = '<span></span><span></span><span></span>';
+      inner.appendChild(typingEl); scrollDown();
+    }
+    function typingOff() {
+      document.getElementById('chat-sub').textContent = 'tu plata, clara';
+      if (typingEl) { typingEl.remove(); typingEl = null; }
+    }
+
+    // Saludo local (el backend responde a partir del primer mensaje enviado).
+    addBot('¡Hola! 👋 Cuéntame un gasto y lo anoto. Algo como: <em>gasté 5 en almuerzo</em>.', { noTime: true });
+
+    var enviando = false;
+    document.getElementById('chat-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var inp = document.getElementById('chat-input'), text = inp.value.trim();
+      if (!text || enviando) return;
+      addUser(text); inp.value = '';
+      enviando = true; typingOn();
+      LUCA.sendChat(text)
+        .then(function (respuestas) {
+          typingOff();
+          if (!respuestas.length) addBot('Recibido 👍');
+          respuestas.forEach(function (r) { addBot(esc(r).replace(/\n/g, '<br>')); });
+        })
+        .catch(function () {
+          typingOff();
+          addBot('Se me enredaron los cables. Intenta de nuevo en un momento. 🙏');
+        })
+        .finally(function () { enviando = false; });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Algo salió mal</title>
+  <link rel="stylesheet" href="../assets/css/tokens.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body>
+  <main class="auth">
+    <div class="auth__card center">
+      <div class="empty__art" style="background:var(--luca-danger-bg);color:var(--luca-danger);font-size:32px" id="err-ico"></div>
+      <h1 class="t-h1 mb-8">Se me enredaron los cables</h1>
+      <p class="muted mb-24">Intenta de nuevo en un momento.</p>
+      <button class="btn btn--primary btn--block" onclick="location.href='inicio.html'">Reintentar</button>
+    </div>
+  </main>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/ui.js"></script>
+  <script>document.getElementById('err-ico').innerHTML = LUCA.icon('alert');</script>
+</body>
+</html>
