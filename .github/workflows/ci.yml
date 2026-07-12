@@ -1,0 +1,15 @@
+# CI: push a main → tests. (Hosting movido a local + túnel ngrok/cloudflared,
+# ya no se despliega a Fly.io — ver scripts/run_local.sh.)
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv run --extra dev python -m pytest -q
