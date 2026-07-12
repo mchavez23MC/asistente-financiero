@@ -10,6 +10,7 @@ orquestador corre estas llamadas cortas dentro del background task.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -17,7 +18,15 @@ from uuid import UUID
 
 from supabase import Client, create_client
 
-from app.domain.models import Budget, Category, Message, Ticket, Transaction, User
+from app.domain.models import (
+    Budget,
+    Category,
+    Message,
+    RecurringIncome,
+    Ticket,
+    Transaction,
+    User,
+)
 
 
 def _dump(model) -> dict:
@@ -29,17 +38,31 @@ def _dump(model) -> dict:
 
 
 class SupabaseRepository:
+    #: Cache de usuario por teléfono (§plan-latencia B1). El mismo usuario envía
+    #: varios mensajes seguidos; get_or_create_user cuesta ~0.5s por round-trip.
+    #: El único campo que muta en sesión (consentimiento_at) se actualiza abajo,
+    #: así que un TTL corto no arriesga re-mostrar el aviso legal.
+    _USER_CACHE_TTL_S = 300.0
+
     def __init__(self, url: str, key: str) -> None:
         self._db: Client = create_client(url, key)
+        self._user_cache: dict[str, tuple[float, User]] = {}
 
     # --- usuarios -----------------------------------------------------------
     def get_or_create_user(self, telefono: str, nombre: Optional[str] = None) -> User:
+        cacheado = self._user_cache.get(telefono)
+        if cacheado and time.monotonic() - cacheado[0] < self._USER_CACHE_TTL_S:
+            return cacheado[1]
+
         res = self._db.table("users").select("*").eq("telefono", telefono).execute()
         if res.data:
-            return User(**res.data[0])
-        nuevo = User(telefono=telefono, nombre=nombre)
-        res = self._db.table("users").insert(_dump(nuevo)).execute()
-        return User(**res.data[0])
+            user = User(**res.data[0])
+        else:
+            nuevo = User(telefono=telefono, nombre=nombre)
+            res = self._db.table("users").insert(_dump(nuevo)).execute()
+            user = User(**res.data[0])
+        self._user_cache[telefono] = (time.monotonic(), user)
+        return user
 
     def registrar_consentimiento(self, user_id: UUID) -> User:
         res = (
@@ -48,7 +71,10 @@ class SupabaseRepository:
             .eq("id", str(user_id))
             .execute()
         )
-        return User(**res.data[0])
+        user = User(**res.data[0])
+        # Refresca el cache: el próximo mensaje ya NO debe ver tiene_consentimiento=False.
+        self._user_cache[user.telefono] = (time.monotonic(), user)
+        return user
 
     # --- mensajes / audit trail ----------------------------------------------
     def save_message(self, message: Message) -> Message:
@@ -109,15 +135,18 @@ class SupabaseRepository:
         res = self._db.table("categories").select("*").order("nombre").execute()
         return [Category(**row) for row in res.data]
 
-    def get_pending_transaction(self, user_id: UUID) -> Optional[Transaction]:
-        res = (
+    def get_pending_transaction(
+        self, user_id: UUID, tipo: Optional[str] = None
+    ) -> Optional[Transaction]:
+        q = (
             self._db.table("transactions")
             .select("*")
             .eq("user_id", str(user_id))
             .eq("status", "pendiente_confirmacion")
-            .limit(1)
-            .execute()
         )
+        if tipo:
+            q = q.eq("tipo", tipo)
+        res = q.limit(1).execute()
         return Transaction(**res.data[0]) if res.data else None
 
     # --- presupuesto (H2) — el sistema calcula; Claude explica (§1.2) ---------
@@ -131,10 +160,30 @@ class SupabaseRepository:
         categoria: Optional[str] = None,
         periodo: Optional[str] = None,
     ) -> Decimal:
+        # tipo='gasto' es CRÍTICO: sin él, un ingreso confirmado (sueldo) contaría
+        # como gasto e inflaría el presupuesto / dispararía alertas falsas.
+        return self._sum_por_tipo("gasto", user_id, categoria, periodo)
+
+    def sum_ingresos(
+        self,
+        user_id: UUID,
+        categoria: Optional[str] = None,
+        periodo: Optional[str] = None,
+    ) -> Decimal:
+        return self._sum_por_tipo("ingreso", user_id, categoria, periodo)
+
+    def _sum_por_tipo(
+        self,
+        tipo: str,
+        user_id: UUID,
+        categoria: Optional[str],
+        periodo: Optional[str],
+    ) -> Decimal:
         q = (
             self._db.table("transactions")
             .select("monto")
             .eq("user_id", str(user_id))
+            .eq("tipo", tipo)
             .eq("status", "confirmada")
         )
         if categoria:
@@ -197,6 +246,49 @@ class SupabaseRepository:
                 "budget_id": str(budget_id),
                 "periodo_clave": periodo_clave,
             }
+        ).execute()
+
+    # --- ingresos recurrentes (sueldo base mensual) -----------------------------
+    def save_recurring_income(self, recurring: RecurringIncome) -> RecurringIncome:
+        data = _dump(recurring)
+        if recurring.id is not None:
+            res = (
+                self._db.table("recurring_incomes")
+                .update(data)
+                .eq("id", str(recurring.id))
+                .execute()
+            )
+        else:
+            res = self._db.table("recurring_incomes").insert(data).execute()
+        return RecurringIncome(**res.data[0])
+
+    def get_recurring_incomes(
+        self, user_id: UUID, solo_activos: bool = True
+    ) -> list[RecurringIncome]:
+        q = self._db.table("recurring_incomes").select("*").eq("user_id", str(user_id))
+        if solo_activos:
+            q = q.eq("activo", True)
+        res = q.order("created_at").execute()
+        return [RecurringIncome(**row) for row in res.data]
+
+    def get_all_recurring_incomes(self) -> list[RecurringIncome]:
+        res = self._db.table("recurring_incomes").select("*").eq("activo", True).execute()
+        return [RecurringIncome(**row) for row in res.data]
+
+    def recordatorio_ya_enviado(self, recurring_id: UUID, periodo_clave: str) -> bool:
+        res = (
+            self._db.table("income_reminders")
+            .select("id")
+            .eq("recurring_id", str(recurring_id))
+            .eq("periodo_clave", periodo_clave)
+            .limit(1)
+            .execute()
+        )
+        return bool(res.data)
+
+    def marcar_recordatorio(self, recurring_id: UUID, periodo_clave: str) -> None:
+        self._db.table("income_reminders").insert(
+            {"recurring_id": str(recurring_id), "periodo_clave": periodo_clave}
         ).execute()
 
 

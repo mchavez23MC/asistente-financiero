@@ -14,7 +14,9 @@ Pipeline por mensaje entrante, partido en dos etapas (§7.5):
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Optional
 
 from app.domain.models import (
@@ -99,44 +101,76 @@ class ProcessMessage:
     # ------------------------------------------------------------------ etapa 1
     async def preprocess(self, incoming: IncomingMessage) -> Optional[AgentContext]:
         """Consentimiento + guardrail. Devuelve el contexto para el agente,
-        o None si el mensaje ya fue atendido (aviso legal / ruta sensible)."""
-        user = self._repo.get_or_create_user(incoming.telefono, incoming.nombre_perfil)
+        o None si el mensaje ya fue atendido (aviso legal / ruta sensible).
+
+        El guardrail (Groq, ~0.5s) NO depende del usuario, así que corre en
+        paralelo con la lectura del usuario en Supabase (~0.5s). Las llamadas
+        síncronas al repo van en hilos (`to_thread`) para no congelar el event
+        loop (afectaría a otros usuarios, al scheduler y al panel)."""
+        t0 = time.perf_counter()
+
+        # --- lectura de usuario y guardrail EN PARALELO (§7.3 / §7.5) ----------
+        # El guardrail sigue resolviéndose antes de que nada llegue al agente;
+        # solo se solapa con I/O que no depende de su veredicto.
+        user, veredicto = await asyncio.gather(
+            asyncio.to_thread(
+                self._repo.get_or_create_user, incoming.telefono, incoming.nombre_perfil
+            ),
+            self._guardrail.classify(incoming.texto),
+        )
 
         # --- (0) consentimiento: primer contacto → aviso legal y nada más (§7.2)
         if not user.tiene_consentimiento:
-            self._repo.save_message(
-                Message(user_id=user.id, rol=Rol.USUARIO, contenido=incoming.texto)
+            await asyncio.to_thread(
+                self._repo.save_message,
+                Message(user_id=user.id, rol=Rol.USUARIO, contenido=incoming.texto),
             )
-            user = self._repo.registrar_consentimiento(user.id)
-            self._audit_respuesta(user.id, AVISO_LEGAL, Intencion.CONSENTIMIENTO)
+            user = await asyncio.to_thread(self._repo.registrar_consentimiento, user.id)
             await self._enviar_seguro(user, AVISO_LEGAL)
+            await self._audit_respuesta(user.id, AVISO_LEGAL, Intencion.CONSENTIMIENTO)
             return None
 
-        # --- (1) guardrail síncrono, antes del agente (§7.3 / §7.5)
-        veredicto = await self._guardrail.classify(incoming.texto)
-        mensaje = self._repo.save_message(
-            Message(user_id=user.id, rol=Rol.USUARIO, contenido=incoming.texto)
+        mensaje = await asyncio.to_thread(
+            self._repo.save_message,
+            Message(user_id=user.id, rol=Rol.USUARIO, contenido=incoming.texto),
         )
         if veredicto.sensible:
             await self._escalar(user, incoming, veredicto, mensaje)
             return None
 
+        # --- contexto: historial + transacción pendiente en paralelo ----------
+        historial, pendiente = await asyncio.gather(
+            asyncio.to_thread(self._repo.get_last_n_messages, user.id, self._historial_n),
+            asyncio.to_thread(self._repo.get_pending_transaction, user.id),
+        )
+        log.info(
+            "preprocess %.0fms guardrail=%s", (time.perf_counter() - t0) * 1000, veredicto.fuente
+        )
         return AgentContext(
             user=user,
             incoming=incoming,
-            historial=self._repo.get_last_n_messages(user.id, self._historial_n),
-            transaccion_pendiente=self._repo.get_pending_transaction(user.id),
+            historial=historial,
+            transaccion_pendiente=pendiente,
         )
 
     # ------------------------------------------------------------------ etapa 2
     async def run_agent(self, context: AgentContext) -> None:
-        """Solo el trabajo del LLM; corre en background tras el 200 (§7.5)."""
+        """Solo el trabajo del LLM; corre en background tras el 200 (§7.5).
+        Se envía primero y se audita después: el usuario ve la respuesta sin
+        esperar la escritura del audit trail (que igual queda garantizado)."""
+        t0 = time.perf_counter()
         handler = self._registry.get("principal")  # agente Claude (o 'eco' en tests)
         result: AgentResult = await handler.handle(context)
-        self._audit_respuesta(
+        await self._enviar_seguro(context.user, result.respuesta)
+        await self._audit_respuesta(
             context.user.id, result.respuesta, result.intencion, result.tool_llamada
         )
-        await self._enviar_seguro(context.user, result.respuesta)
+        log.info(
+            "agente %.0fms tool=%s intención=%s",
+            (time.perf_counter() - t0) * 1000,
+            result.tool_llamada,
+            result.intencion,
+        )
 
     # ------------------------------------------------------------------ internos
     async def _escalar(
@@ -150,7 +184,8 @@ class ProcessMessage:
         El mensaje NUNCA llega al agente principal."""
         motivo = _motivo_de(veredicto)
         fail_closed = motivo == MotivoEscalacion.GUARDRAIL_FAIL_CLOSED
-        self._repo.create_ticket(
+        await asyncio.to_thread(
+            self._repo.create_ticket,
             Ticket(
                 user_id=user.id,
                 motivo=motivo,
@@ -164,11 +199,11 @@ class ProcessMessage:
                     f"categoria={veredicto.categoria}, confianza={veredicto.confianza:.2f}"
                 ),
                 mensaje_origen_id=mensaje.id,
-            )
+            ),
         )
         respuesta = RESPUESTA_FAIL_CLOSED if fail_closed else RESPUESTA_SENSIBLE
-        self._audit_respuesta(user.id, respuesta, Intencion.SENSIBLE)
         await self._enviar_seguro(user, respuesta)
+        await self._audit_respuesta(user.id, respuesta, Intencion.SENSIBLE)
 
     async def _enviar_seguro(self, user, texto: str) -> None:
         """Envía por el canal sin propagar fallos de entrega. Un 4xx/5xx del
@@ -179,20 +214,22 @@ class ProcessMessage:
         except Exception:
             log.exception("No se pudo entregar el mensaje al usuario %s", user.id)
 
-    def _audit_respuesta(
+    async def _audit_respuesta(
         self,
         user_id,
         respuesta: str,
         intencion: Intencion,
         tool_llamada: str | None = None,
     ) -> None:
-        """Escribe la respuesta del asistente con intención y tool (audit trail §7.4)."""
-        self._repo.save_message(
+        """Escribe la respuesta del asistente con intención y tool (audit trail §7.4).
+        El insert va en un hilo para no bloquear el event loop."""
+        await asyncio.to_thread(
+            self._repo.save_message,
             Message(
                 user_id=user_id,
                 rol=Rol.ASISTENTE,
                 contenido=respuesta,
                 intencion=intencion,
                 tool_llamada=tool_llamada,
-            )
+            ),
         )

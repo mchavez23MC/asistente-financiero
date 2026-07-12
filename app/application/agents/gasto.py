@@ -39,7 +39,7 @@ def registrar_gasto(
     categoria: Optional[str] = None,
     comercio: Optional[str] = None,
 ) -> dict:
-    pendiente = repo.get_pending_transaction(user_id)
+    pendiente = repo.get_pending_transaction(user_id, tipo="gasto")
 
     # Merge sobre la pendiente: los campos nuevos (no nulos) pisan a los viejos.
     monto_dec = _a_decimal(monto)
@@ -67,10 +67,16 @@ def registrar_gasto(
         ),
     )
     guardada = repo.save_transaction(tx)
+    # Total groundeado de la categoría este mes (§1.2: el sistema calcula, Claude
+    # explica). Solo tiene sentido si ya quedó confirmada y con categoría.
+    total = None
+    if confirmada and guardada.categoria:
+        total = float(repo.sum_gastos(user_id, categoria=guardada.categoria, periodo="mensual"))
     return {
         "transaction_id": str(guardada.id),
         "status": guardada.status,
         "faltantes": faltantes,
+        "total_categoria_periodo": total,
     }
 
 

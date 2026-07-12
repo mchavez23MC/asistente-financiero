@@ -25,7 +25,11 @@ DENYLIST: dict[str, tuple[str, ...]] = {
     ),
     "reclamo": (
         "reclamo", "queja", "demanda", "demandar", "abogado", "denuncia",
-        "reembolso", "devolucion del dinero",
+        # 'reembolso' se quitó: es una categoría legítima de INGRESO ("recibí un
+        # reembolso del seguro") y no debe escalar por keyword. El contexto de
+        # queja ("quiero la devolución de lo que me cobraron") lo atrapa el
+        # clasificador; se conserva la frase más inequívoca de reclamo.
+        "devolucion del dinero",
     ),
     "regulatorio": (
         "lavado de dinero", "defensoria del consumidor", "superintendencia",

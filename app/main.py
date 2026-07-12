@@ -32,7 +32,21 @@ from app.interfaces.api import legal, panel, web_chat, webhook_twilio
 log = logging.getLogger("e5")
 
 
+def _configurar_logging() -> None:
+    """La telemetría de latencia (§plan-latencia C1) sale por el logger 'e5' en
+    nivel INFO. Uvicorn deja el root en WARNING, así que se le da un handler
+    propio para que las líneas 'preprocess …ms' / 'agente …ms' se vean."""
+    if log.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s: %(message)s"))
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    log.propagate = False
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
+    _configurar_logging()
     if settings is None:
         settings = Settings.from_env()
 

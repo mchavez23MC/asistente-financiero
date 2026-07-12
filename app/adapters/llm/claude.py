@@ -8,7 +8,7 @@ en el `system` que arma `soporte_rag`.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any, AsyncIterator, Optional, Union
 
 from anthropic import AsyncAnthropic
 
@@ -38,7 +38,36 @@ class ClaudeProvider:
             kwargs["tools"] = tools
 
         resp = await self._client.messages.create(**kwargs)
+        return self._normalizar(resp)
 
+    async def stream(
+        self,
+        messages: list[dict],
+        tools: Optional[list[dict]] = None,
+        system: Union[str, list[dict], None] = None,
+    ) -> AsyncIterator[tuple[str, Any]]:
+        """Streaming (§plan-latencia C3). Async generator que emite:
+          - ("text", delta)  por cada fragmento de texto según llega,
+          - ("done", LLMResponse) al final, con tool_calls y texto completo,
+        para que el bucle de tool use del agente decida si sigue o termina."""
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": self._max_tokens,
+            "messages": messages,
+        }
+        if system is not None:
+            kwargs["system"] = system
+        if tools:
+            kwargs["tools"] = tools
+
+        async with self._client.messages.stream(**kwargs) as stream:
+            async for delta in stream.text_stream:
+                yield ("text", delta)
+            final = await stream.get_final_message()
+        yield ("done", self._normalizar(final))
+
+    @staticmethod
+    def _normalizar(resp) -> LLMResponse:
         texto_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         for block in resp.content:
@@ -48,7 +77,6 @@ class ClaudeProvider:
                 tool_calls.append(
                     ToolCall(id=block.id, nombre=block.name, argumentos=dict(block.input))
                 )
-
         usage = resp.usage
         return LLMResponse(
             texto="".join(texto_parts) or None,

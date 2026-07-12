@@ -30,6 +30,7 @@ from app.domain.models import (
     IncomingMessage,
     LLMResponse,
     Message,
+    RecurringIncome,
     Ticket,
     Transaction,
     User,
@@ -141,11 +142,16 @@ class Repository(Protocol):
         """Últimos mensajes de todos los usuarios (audit trail del panel, §7.4)."""
         ...
 
-    # --- transacciones (H1) ---
+    # --- transacciones (H1: gastos e ingresos) ---
     def save_transaction(self, transaction: Transaction) -> Transaction:
         ...
 
-    def get_pending_transaction(self, user_id: UUID) -> Optional[Transaction]:
+    def get_pending_transaction(
+        self, user_id: UUID, tipo: Optional[str] = None
+    ) -> Optional[Transaction]:
+        """Transacción a medias del usuario. Con `tipo` ('gasto'|'ingreso') filtra
+        por tipo (el loop de confirmación de gastos no completa un ingreso, ni al
+        revés); sin `tipo`, devuelve cualquiera pendiente (contexto del agente)."""
         ...
 
     # --- categorías (catálogo de T2) ---
@@ -166,7 +172,17 @@ class Repository(Protocol):
         categoria: Optional[str] = None,
         periodo: Optional[str] = None,
     ) -> Decimal:
-        """Suma agregada de gastos confirmados. El sistema calcula el número (§1.2)."""
+        """Suma agregada de GASTOS confirmados (tipo='gasto'). El sistema calcula
+        el número (§1.2). Debe excluir ingresos, o inflaría el presupuesto."""
+        ...
+
+    def sum_ingresos(
+        self,
+        user_id: UUID,
+        categoria: Optional[str] = None,
+        periodo: Optional[str] = None,
+    ) -> Decimal:
+        """Suma agregada de INGRESOS confirmados (tipo='ingreso') del periodo."""
         ...
 
     # --- tickets (escalación) ---
@@ -197,4 +213,25 @@ class Repository(Protocol):
         ...
 
     def marcar_alerta(self, user_id: UUID, budget_id: UUID, periodo_clave: str) -> None:
+        ...
+
+    # --- ingresos recurrentes (sueldo base mensual) ---
+    def save_recurring_income(self, recurring: RecurringIncome) -> RecurringIncome:
+        """Crea o actualiza (si trae id) un ingreso recurrente."""
+        ...
+
+    def get_recurring_incomes(
+        self, user_id: UUID, solo_activos: bool = True
+    ) -> list[RecurringIncome]:
+        ...
+
+    def get_all_recurring_incomes(self) -> list[RecurringIncome]:
+        """Todas las recurrencias activas de todos los usuarios (cron de recordatorios)."""
+        ...
+
+    def recordatorio_ya_enviado(self, recurring_id: UUID, periodo_clave: str) -> bool:
+        """Idempotencia: ¿ya se recordó esta recurrencia en este periodo?"""
+        ...
+
+    def marcar_recordatorio(self, recurring_id: UUID, periodo_clave: str) -> None:
         ...

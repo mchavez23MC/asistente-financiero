@@ -44,11 +44,20 @@ class Intencion(str, Enum):
     """Intención detectada por el orquestador/agente (audit trail §7.4)."""
 
     GASTO = "gasto"                # H1
+    INGRESO = "ingreso"            # H1 (ingresos — plan-implementacion-ingresos)
     PRESUPUESTO = "presupuesto"    # H2
     SOPORTE = "soporte"            # H3
     SENSIBLE = "sensible"          # ruta guardrail → ticket
     CONSENTIMIENTO = "consentimiento"
     OTRO = "otro"
+
+
+class TransactionTipo(str, Enum):
+    """Distingue plata que sale (gasto) de plata que entra (ingreso). El default
+    'gasto' deja correctos, sin migración, los datos previos a los ingresos."""
+
+    GASTO = "gasto"
+    INGRESO = "ingreso"
 
 
 class TransactionStatus(str, Enum):
@@ -151,12 +160,15 @@ class Category(BaseModel):
 
 
 class Transaction(BaseModel):
-    """Gasto registrado (H1). Si falta info obligatoria → `pendiente_confirmacion` (§3.1)."""
+    """Movimiento registrado (H1): gasto o ingreso. Si falta info obligatoria →
+    `pendiente_confirmacion` (§3.1). Para un ingreso, `comercio` guarda la FUENTE
+    (empresa, cliente, "venta bici") — misma columna, semántica según `tipo`."""
 
     model_config = ConfigDict(use_enum_values=True)
 
     id: Optional[UUID] = None
     user_id: UUID
+    tipo: TransactionTipo = TransactionTipo.GASTO
     monto: Optional[Decimal] = Field(default=None, description="Positivo. None mientras esté pendiente.")
     fecha: Optional[date] = None
     categoria: Optional[str] = None
@@ -168,6 +180,31 @@ class Transaction(BaseModel):
     @classmethod
     def _monto_positivo(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         if v is not None and v <= 0:
+            raise ValueError("El monto debe ser positivo.")
+        return v
+
+
+class RecurringIncome(BaseModel):
+    """Ingreso fijo mensual (sueldo base, arriendo que entra…). El scheduler envía
+    un recordatorio el día configurado; el registro real lo confirma el usuario
+    por chat (decisión D3 del plan) — este modelo NO crea transacciones por sí solo."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: Optional[UUID] = None
+    user_id: UUID
+    monto: Decimal
+    categoria: str = "Salario"
+    fuente: Optional[str] = None
+    # 1..28: se evita la casuística de febrero/meses de 30 (ver plan).
+    dia_del_mes: int = Field(..., ge=1, le=28)
+    activo: bool = True
+    created_at: datetime = Field(default_factory=_utcnow)
+
+    @field_validator("monto")
+    @classmethod
+    def _monto_positivo(cls, v: Decimal) -> Decimal:
+        if v <= 0:
             raise ValueError("El monto debe ser positivo.")
         return v
 

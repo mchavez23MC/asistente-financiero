@@ -77,9 +77,11 @@ def test_puertos_existen():
 
 
 # --- contrato de tools (T1) -------------------------------------------------
-def test_cuatro_tools():
+def test_set_de_tools():
     assert TOOL_NAMES == {
         "registrar_gasto",
+        "registrar_ingreso",
+        "configurar_ingreso_recurrente",
         "consultar_presupuesto",
         "responder_soporte",
         "crear_ticket",

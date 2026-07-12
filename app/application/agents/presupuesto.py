@@ -21,6 +21,7 @@ def consultar_presupuesto(
     categoria: Optional[str] = None,
 ) -> dict:
     gastado = repo.sum_gastos(user_id, categoria=categoria, periodo=periodo)
+    ingresos = repo.sum_ingresos(user_id, categoria=categoria, periodo=periodo)
 
     # Límite: el del presupuesto de esa categoría/periodo, o la suma de límites
     # del periodo si no se filtró por categoría.
@@ -40,6 +41,9 @@ def consultar_presupuesto(
         "categoria": categoria,
         "limite": _num(limite),
         "gastado": _num(gastado),
+        "ingresos": _num(ingresos),
+        # Balance del periodo = lo que entró menos lo que salió (§1.2, groundeado).
+        "balance": _num(ingresos - gastado),
         "restante": _num(restante),
         "porcentaje": porcentaje,
     }

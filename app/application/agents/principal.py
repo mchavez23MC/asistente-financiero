@@ -15,6 +15,7 @@ import json
 from uuid import UUID
 
 from app.application.agents.gasto import registrar_gasto
+from app.application.agents.ingreso import configurar_ingreso_recurrente, registrar_ingreso
 from app.application.agents.presupuesto import consultar_presupuesto
 from app.application.agents.soporte_rag import SoporteRAG
 from app.domain.models import (
@@ -50,13 +51,35 @@ del sistema, es la responsabilidad que te toca a ti en esta arquitectura.
 ## TU PROPÓSITO
 Ayudas a UNA persona —identificada por su número de teléfono en esta
 conversación— con:
-- Registrar y categorizar sus gastos (tool: registrar_gasto)
-- Consultar su presupuesto e insights (tool: consultar_presupuesto)
+- Registrar y categorizar sus GASTOS (tool: registrar_gasto)
+- Registrar y categorizar sus INGRESOS —sueldo, freelance, venta,
+  regalo, etc. (tool: registrar_ingreso). Usa esta tool, NO
+  registrar_gasto, para la plata que ENTRA.
+- Configurar un ingreso fijo mensual, como su sueldo base, para que cada
+  mes se le recuerde registrarlo (tool: configurar_ingreso_recurrente).
+  Esta tool NO registra el ingreso: solo guarda la configuración; el
+  registro real lo confirma el usuario cuando el sistema le recuerde.
+- Consultar su presupuesto, balance e insights (tool: consultar_presupuesto)
 - Resolver dudas de soporte usando la base de conocimiento aprobada
   (tool: responder_soporte) — nunca inventes fuera de esos documentos
 - Escalar a un humano cuando el usuario lo pida explícitamente, cuando
   una tool lo requiera, o cuando tu propia revisión final detecte algo
   sensible que las capas anteriores no atraparon (tool: crear_ticket)
+
+## CATEGORÍAS (usa exactamente estas, elige la más cercana)
+Gastos: categoriza con naturalidad (comida, transporte, servicios, etc.).
+Ingresos: Salario · Freelance/Independiente · Bono o comisión ·
+Reembolso · Regalo · Venta · Otro ingreso.
+Si no puedes determinar la categoría con confianza razonable, pregunta
+en vez de adivinar — nunca registres una categoría solo por descarte.
+
+## INGRESO RECURRENTE (sueldo base)
+Si el usuario describe un ingreso que se repite cada mes ("mi sueldo es
+450 y me pagan el 30"), usa configurar_ingreso_recurrente, no
+registrar_ingreso. Si el día que dice es mayor a 28, la tool lo ajusta a
+28 — avísale con calidez ("lo dejé para el 28, así no se salta en
+febrero"). Cuando el sistema le recuerde su sueldo y el usuario confirme
+("sí", "me llegaron los 450"), AHÍ recién usa registrar_ingreso.
 
 ## REVISIÓN FINAL DE SENSIBILIDAD (cuarta capa — tu responsabilidad)
 Antes de responder o ejecutar una tool, revisa brevemente si el mensaje
@@ -99,10 +122,14 @@ documento de identidad. Si el usuario los comparte sin que se los
 pidieras, no los repitas ni proceses; indica brevemente que no hace
 falta compartir eso.
 
-## NÚMEROS DE PRESUPUESTO (H2)
-EL SISTEMA CALCULA LOS NÚMEROS; tú solo los explicas. Nunca sumes ni
-estimes totales por tu cuenta: usa siempre lo que devuelve la tool
-consultar_presupuesto.
+## NÚMEROS DE PRESUPUESTO Y TOTALES (H2 — grounded)
+EL SISTEMA CALCULA LOS NÚMEROS; tú solo los explicas. Nunca sumes,
+estimes ni proyectes totales, porcentajes, saldos o balances por tu
+cuenta: usa siempre lo que devuelve consultar_presupuesto. Al confirmar
+un registro, solo menciona un total acumulado ("vas $85 en comida") o
+un balance si ese dato vino en el RESULTADO de la tool (registrar_gasto
+y registrar_ingreso devuelven total_categoria_periodo). Si el retorno no
+trae el total, confirma el registro sin inventar el número.
 
 ## USO DE TOOLS Y AUDITORÍA
 Cada mensaje tuyo se registra junto con la intención detectada y la tool
@@ -137,15 +164,31 @@ coloquial o muy neutro, elige neutro-cálido antes que forzar la jerga."""
 # tool → intención para el audit trail (§7.4). La última tool específica gana.
 _INTENCION_POR_TOOL = {
     "registrar_gasto": Intencion.GASTO,
+    "registrar_ingreso": Intencion.INGRESO,
+    "configurar_ingreso_recurrente": Intencion.INGRESO,
     "consultar_presupuesto": Intencion.PRESUPUESTO,
     "responder_soporte": Intencion.SOPORTE,
 }
+
+# System prompt como bloque cacheado (prompt caching, §4). El breakpoint sobre el
+# bloque de sistema cachea el prefijo estable ENTERO —tools + system—, que es
+# idéntico en cada request y en cada turno del bucle de tool use. Recorta el TTFT
+# de Claude y ~90% del costo de input en los hits (el prefijo pesa ~3.6k tokens).
+_SYSTEM_CACHED: list[dict] = [
+    {
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
 
 _MOTIVOS_VALIDOS = {m.value for m in MotivoEscalacion}
 _PRIORIDADES_VALIDAS = {p.value for p in TicketPrioridad}
 
 _ARGS_TOOL = {
     "registrar_gasto": {"monto", "fecha", "categoria", "comercio"},
+    "registrar_ingreso": {"monto", "fecha", "categoria", "fuente"},
+    "configurar_ingreso_recurrente": {"accion", "monto", "categoria", "fuente", "dia_del_mes"},
     "consultar_presupuesto": {"periodo", "categoria"},
     "responder_soporte": {"pregunta"},
 }
@@ -173,7 +216,7 @@ class MainAgent:
 
         for _ in range(self._max_turns):
             resp = await self._llm.complete(
-                messages=messages, tools=TOOLS, system=SYSTEM_PROMPT
+                messages=messages, tools=TOOLS, system=_SYSTEM_CACHED
             )
             if not resp.tool_calls:
                 return AgentResult(
@@ -214,6 +257,65 @@ class MainAgent:
             tool_llamada=ultima_tool,
         )
 
+    async def handle_stream(self, context: AgentContext, capture: dict):
+        """Versión streaming de `handle` (§plan-latencia C3). Async generator que
+        emite el texto del asistente en fragmentos según Claude lo genera; el
+        bucle de tool use es idéntico (los turnos de tool no llevan texto para el
+        usuario, o muy poco preámbulo). Al terminar llena `capture` con
+        {respuesta, intencion, tool_llamada} para el audit trail (§7.4)."""
+        messages = self._build_messages(context.historial, context.incoming.texto)
+        intencion = Intencion.OTRO
+        ultima_tool: str | None = None
+        todo = ""  # todo el texto que vio el usuario, para auditar con fidelidad
+
+        for _ in range(self._max_turns):
+            resp = None
+            async for kind, payload in self._llm.stream(
+                messages=messages, tools=TOOLS, system=_SYSTEM_CACHED
+            ):
+                if kind == "text":
+                    todo += payload
+                    yield payload
+                else:  # ("done", LLMResponse)
+                    resp = payload
+
+            if not resp.tool_calls:
+                capture.update(
+                    respuesta=todo or resp.texto or "¿En qué más te ayudo?",
+                    intencion=intencion,
+                    tool_llamada=ultima_tool,
+                )
+                return
+
+            # Realimentar el turno del asistente (bloques text + tool_use).
+            asistente: list[dict] = []
+            if resp.texto:
+                asistente.append({"type": "text", "text": resp.texto})
+            for tc in resp.tool_calls:
+                asistente.append(
+                    {"type": "tool_use", "id": tc.id, "name": tc.nombre, "input": tc.argumentos}
+                )
+            messages.append({"role": "assistant", "content": asistente})
+
+            resultados: list[dict] = []
+            for tc in resp.tool_calls:
+                ultima_tool = tc.nombre
+                intencion = _INTENCION_POR_TOOL.get(tc.nombre, intencion)
+                salida = await self._ejecutar(tc.nombre, tc.argumentos, context)
+                resultados.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": json.dumps(salida, ensure_ascii=False, default=str),
+                    }
+                )
+            messages.append({"role": "user", "content": resultados})
+
+        degradado = "Dame un momento para terminar de procesar tu solicitud. 🙏"
+        capture.update(respuesta=todo or degradado, intencion=intencion, tool_llamada=ultima_tool)
+        if not todo:
+            yield degradado
+
     # ------------------------------------------------------------------ internos
     def _build_messages(self, historial: list[Message], texto_actual: str) -> list[dict]:
         """Historial → formato de mensajes de Anthropic. El último mensaje del
@@ -236,6 +338,10 @@ class MainAgent:
             argumentos = {k: v for k, v in argumentos.items() if k in _ARGS_TOOL[nombre]}
         if nombre == "registrar_gasto":
             return registrar_gasto(self._repo, uid, **argumentos)
+        if nombre == "registrar_ingreso":
+            return registrar_ingreso(self._repo, uid, **argumentos)
+        if nombre == "configurar_ingreso_recurrente":
+            return configurar_ingreso_recurrente(self._repo, uid, **argumentos)
         if nombre == "consultar_presupuesto":
             return consultar_presupuesto(self._repo, uid, **argumentos)
         if nombre == "responder_soporte":

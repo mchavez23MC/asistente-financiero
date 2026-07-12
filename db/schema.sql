@@ -42,18 +42,21 @@ create table if not exists messages (
     rol          text not null check (rol in ('user', 'assistant', 'system')),
     contenido    text not null,
     intencion    text check (intencion in
-                    ('gasto','presupuesto','soporte','sensible','consentimiento','otro')),
+                    ('gasto','ingreso','presupuesto','soporte','sensible','consentimiento','otro')),
     tool_llamada text,
     timestamp    timestamptz not null default now()
 );
 create index if not exists idx_messages_user_ts on messages (user_id, timestamp desc);
 
 -- ---------------------------------------------------------------------
--- transactions — gastos (H1), con status de confirmación (§3.1)
+-- transactions — movimientos (H1): gastos e ingresos, con status de
+-- confirmación (§3.1). `tipo` default 'gasto' deja correctos los datos previos
+-- a los ingresos sin migración. Para un ingreso, `comercio` guarda la fuente.
 -- ---------------------------------------------------------------------
 create table if not exists transactions (
     id         uuid primary key default gen_random_uuid(),
     user_id    uuid not null references users(id) on delete cascade,
+    tipo       text not null default 'gasto' check (tipo in ('gasto','ingreso')),
     monto      numeric(12,2) check (monto is null or monto > 0),
     fecha      date,
     categoria  text,
@@ -63,9 +66,13 @@ create table if not exists transactions (
     created_at timestamptz not null default now()
 );
 create index if not exists idx_transactions_user on transactions (user_id, fecha desc);
--- A lo sumo una transacción pendiente por usuario (el loop de confirmación de H1).
-create unique index if not exists uq_transaction_pendiente
-    on transactions (user_id)
+-- A lo sumo una transacción pendiente por usuario Y tipo (el loop de confirmación
+-- de H1): así un ingreso a medias no pisa a un gasto a medias, ni viceversa.
+-- (Se dropea primero por si existe la versión previa solo-por-user_id con el
+-- mismo nombre — `create ... if not exists` no la redefiniría.)
+drop index if exists uq_transaction_pendiente;
+create unique index uq_transaction_pendiente
+    on transactions (user_id, tipo)
     where status = 'pendiente_confirmacion';
 
 -- ---------------------------------------------------------------------
@@ -116,4 +123,32 @@ create table if not exists alerts (
     periodo_clave text not null,               -- ej. 'mensual:2026-07'
     created_at    timestamptz not null default now(),
     unique (budget_id, periodo_clave)
+);
+
+-- ---------------------------------------------------------------------
+-- recurring_incomes — ingreso fijo mensual (sueldo base, etc.)
+-- El scheduler recuerda; el usuario confirma por chat (decisión D3 del plan).
+-- ---------------------------------------------------------------------
+create table if not exists recurring_incomes (
+    id          uuid primary key default gen_random_uuid(),
+    user_id     uuid not null references users(id) on delete cascade,
+    monto       numeric(12,2) not null check (monto > 0),
+    categoria   text not null default 'Salario',
+    fuente      text,
+    dia_del_mes int  not null check (dia_del_mes between 1 and 28),
+    activo      boolean not null default true,
+    created_at  timestamptz not null default now()
+);
+create index if not exists idx_recurring_user on recurring_incomes (user_id, activo);
+
+-- ---------------------------------------------------------------------
+-- income_reminders — idempotencia del recordatorio de ingreso recurrente.
+-- Una fila por (recurrencia, periodo) ya recordado (mismo patrón que alerts).
+-- ---------------------------------------------------------------------
+create table if not exists income_reminders (
+    id            uuid primary key default gen_random_uuid(),
+    recurring_id  uuid not null references recurring_incomes(id) on delete cascade,
+    periodo_clave text not null,               -- ej. 'mensual:2026-07'
+    created_at    timestamptz not null default now(),
+    unique (recurring_id, periodo_clave)
 );

@@ -46,6 +46,22 @@ class WhatsAppTwilioAdapter:
         # Número emisor en formato Twilio ('whatsapp:+14155238886').
         self._from = self._to_whatsapp(whatsapp_from)
         self._url = f"{TWILIO_API_BASE}/Accounts/{account_sid}/Messages.json"
+        # Cliente reutilizable: evita un handshake TLS nuevo por cada envío
+        # (~100-300 ms). Se crea perezosamente en el primer send (así los
+        # adaptadores que nunca envían —p.ej. en tests— no abren conexiones).
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                auth=(self._account_sid, self._auth_token), timeout=15
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     def parse(self, payload: dict) -> IncomingMessage:
         """Normaliza el webhook (form-encoded → dict) de Twilio al formato
@@ -69,12 +85,10 @@ class WhatsAppTwilioAdapter:
 
     async def send(self, user: User, text: str) -> None:
         to = self._to_whatsapp(user.telefono)
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                self._url,
-                auth=(self._account_sid, self._auth_token),
-                data={"From": self._from, "To": to, "Body": text},
-            )
+        resp = await self._get_client().post(
+            self._url,
+            data={"From": self._from, "To": to, "Body": text},
+        )
         if resp.is_error:
             # El cuerpo de Twilio trae `code` y `message` con el motivo exacto
             # (ej. 63016 fuera de la ventana de 24h, 21608 número no unido al

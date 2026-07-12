@@ -128,3 +128,48 @@ def test_webchat_segundo_mensaje_pasa_por_el_agente():
     client.post("/chat/send", json={"texto": "hola"})  # consentimiento
     r = client.post("/chat/send", json={"texto": "prueba"})
     assert r.json()["respuestas"] == ["eco:prueba"]
+
+
+# --- chat web: streaming (plan-latencia C3) -----------------------------------------
+class AgenteStream:
+    intent = "principal"
+
+    async def handle(self, context) -> AgentResult:  # fallback no usado aquí
+        return AgentResult(respuesta="fallback", intencion=Intencion.OTRO)
+
+    async def handle_stream(self, context, capture):
+        for frag in ["Hola", " ", "ñaño"]:
+            yield frag
+        capture.update(respuesta="Hola ñaño", intencion=Intencion.OTRO, tool_llamada=None)
+
+
+def _app_webchat_stream():
+    app = FastAPI()
+    repo = FakeRepo()
+    registry = InMemoryAgentRegistry()
+    registry.register(AgenteStream())
+    app.state.repo = repo
+    app.state.guardrail = SiempreOk()
+    app.state.registry = registry
+    app.include_router(web_chat.router)
+    return app, repo
+
+
+def test_webchat_stream_emite_fragmentos_sse_y_audita():
+    app, repo = _app_webchat_stream()
+    client = TestClient(app)
+    client.post("/chat/stream", json={"texto": "hola"})  # consentimiento
+    r = client.post("/chat/stream", json={"texto": "prueba"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    # Los fragmentos llegan como eventos SSE JSON-encodeados.
+    assert 'data: "Hola"' in r.text and "ñaño" in r.text
+    # El audit trail guardó la respuesta completa reconstruida.
+    assert repo.messages[-1].contenido == "Hola ñaño"
+
+
+def test_webchat_stream_consentimiento_emite_aviso_legal():
+    app, repo = _app_webchat_stream()
+    r = TestClient(app).post("/chat/stream", json={"texto": "hola"})
+    assert r.status_code == 200
+    assert "acept" in r.text.lower() or "términos" in r.text.lower()

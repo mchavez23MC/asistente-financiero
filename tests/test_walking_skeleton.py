@@ -50,6 +50,8 @@ class FakeRepo:
         self.budgets: list[Budget] = []
         self.alerts: set[tuple] = set()
         self.categories: set[str] = set()
+        self.recurring_incomes: list = []
+        self.income_reminders: set[tuple] = set()
 
     def get_or_create_user(self, telefono: str, nombre: Optional[str] = None) -> User:
         for u in self.users.values():
@@ -102,11 +104,12 @@ class FakeRepo:
 
         return [Category(nombre=n) for n in sorted(self.categories)]
 
-    def get_pending_transaction(self, user_id: UUID) -> Optional[Transaction]:
+    def get_pending_transaction(self, user_id: UUID, tipo: Optional[str] = None) -> Optional[Transaction]:
         estado = "pendiente_confirmacion"
         for t in self.transactions:
             status = t.status if isinstance(t.status, str) else t.status.value
-            if t.user_id == user_id and status == estado:
+            t_tipo = t.tipo if isinstance(t.tipo, str) else t.tipo.value
+            if t.user_id == user_id and status == estado and (tipo is None or t_tipo == tipo):
                 return t
         return None
 
@@ -117,10 +120,19 @@ class FakeRepo:
         return list(self.budgets)
 
     def sum_gastos(self, user_id, categoria=None, periodo=None) -> Decimal:
+        return self._sum_por_tipo("gasto", user_id, categoria)
+
+    def sum_ingresos(self, user_id, categoria=None, periodo=None) -> Decimal:
+        return self._sum_por_tipo("ingreso", user_id, categoria)
+
+    def _sum_por_tipo(self, tipo, user_id, categoria=None) -> Decimal:
         total = Decimal("0")
         for t in self.transactions:
             status = t.status if isinstance(t.status, str) else t.status.value
+            t_tipo = t.tipo if isinstance(t.tipo, str) else t.tipo.value
             if t.user_id != user_id or status != "confirmada" or t.monto is None:
+                continue
+            if t_tipo != tipo:
                 continue
             if categoria and t.categoria != categoria:
                 continue
@@ -151,6 +163,31 @@ class FakeRepo:
 
     def marcar_alerta(self, user_id: UUID, budget_id: UUID, periodo_clave: str) -> None:
         self.alerts.add((budget_id, periodo_clave))
+
+    # --- ingresos recurrentes ---
+    def save_recurring_income(self, recurring):
+        if recurring.id is not None:
+            self.recurring_incomes = [r for r in self.recurring_incomes if r.id != recurring.id]
+            saved = recurring
+        else:
+            saved = recurring.model_copy(update={"id": uuid4()})
+        self.recurring_incomes.append(saved)
+        return saved
+
+    def get_recurring_incomes(self, user_id: UUID, solo_activos: bool = True) -> list:
+        return [
+            r for r in self.recurring_incomes
+            if r.user_id == user_id and (not solo_activos or r.activo)
+        ]
+
+    def get_all_recurring_incomes(self) -> list:
+        return [r for r in self.recurring_incomes if r.activo]
+
+    def recordatorio_ya_enviado(self, recurring_id: UUID, periodo_clave: str) -> bool:
+        return (recurring_id, periodo_clave) in self.income_reminders
+
+    def marcar_recordatorio(self, recurring_id: UUID, periodo_clave: str) -> None:
+        self.income_reminders.add((recurring_id, periodo_clave))
 
 
 class FakeChannel:

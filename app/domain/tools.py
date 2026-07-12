@@ -52,6 +52,102 @@ REGISTRAR_GASTO = {
     #    "faltantes": [str]}  -> lista de campos que aún faltan para confirmar.
 }
 
+# --- H1: registrar un ingreso (espejo de registrar_gasto) -------------------
+CATEGORIAS_INGRESO = [
+    "Salario",
+    "Freelance/Independiente",
+    "Bono o comisión",
+    "Reembolso",
+    "Regalo",
+    "Venta",
+    "Otro ingreso",
+]
+
+REGISTRAR_INGRESO = {
+    "name": "registrar_ingreso",
+    "description": (
+        "Registra un ingreso del usuario (sueldo, freelance, venta, regalo, etc.). "
+        "Si falta información obligatoria (monto), el ingreso queda en estado "
+        "'pendiente_confirmacion' y debes pedir el dato faltante. No inventes "
+        "montos ni fuentes. Usa esta tool, NO registrar_gasto, para plata que ENTRA."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "monto": {
+                "type": "number",
+                "description": "Monto del ingreso, positivo. Omitir si el usuario no lo dio.",
+            },
+            "fecha": {
+                "type": "string",
+                "format": "date",
+                "description": "Fecha del ingreso (YYYY-MM-DD). Si no se especifica, usar hoy.",
+            },
+            "categoria": {
+                "type": "string",
+                "enum": CATEGORIAS_INGRESO,
+                "description": "Categoría del ingreso. Elige la más cercana del enum.",
+            },
+            "fuente": {
+                "type": "string",
+                "description": "De dónde viene (empresa, cliente, 'venta de la bici'…).",
+            },
+        },
+        "required": [],  # nada obligatorio a nivel schema: el status maneja lo incompleto
+    },
+    # Retorno documentado:
+    #   {"transaction_id": str, "status": "confirmada"|"pendiente_confirmacion",
+    #    "faltantes": [str], "total_categoria_periodo": number}
+}
+
+# --- H1: configurar un ingreso fijo mensual (sueldo base recurrente) ---------
+CONFIGURAR_INGRESO_RECURRENTE = {
+    "name": "configurar_ingreso_recurrente",
+    "description": (
+        "Configura, actualiza o desactiva un ingreso fijo mensual del usuario "
+        "(ej. su sueldo base). NO registra el ingreso: cada mes el sistema le "
+        "recordará al usuario para que confirme y recién ahí se registra. Úsala "
+        "cuando el usuario describa un ingreso que se repite todos los meses "
+        "('mi sueldo es 450 y me pagan el 30'). El usuario puede tener varios."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "accion": {
+                "type": "string",
+                "enum": ["crear", "actualizar", "desactivar"],
+                "description": "Qué hacer con la recurrencia. Por defecto 'crear'.",
+            },
+            "monto": {
+                "type": "number",
+                "description": "Monto fijo del ingreso mensual, positivo.",
+            },
+            "categoria": {
+                "type": "string",
+                "enum": CATEGORIAS_INGRESO,
+                "description": "Categoría del ingreso recurrente. Por defecto 'Salario'.",
+            },
+            "fuente": {
+                "type": "string",
+                "description": "De dónde viene (empresa, arriendo, etc.).",
+            },
+            "dia_del_mes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 28,
+                "description": (
+                    "Día del mes en que suele llegar (1-28). Si el usuario dice un "
+                    "día > 28, usa 28 y avísale con calidez que lo ajustaste."
+                ),
+            },
+        },
+        "required": ["accion"],
+    },
+    # Retorno documentado:
+    #   {"recurring_id": str, "activo": bool, "monto": number, "categoria": str,
+    #    "dia_del_mes": int}
+}
+
 # --- H2: consultar presupuesto / resumen de gastos --------------------------
 CONSULTAR_PRESUPUESTO = {
     "name": "consultar_presupuesto",
@@ -145,6 +241,8 @@ CREAR_TICKET = {
 #: Set completo de tools del agente principal (H1 + H2 + H3 como opción C, §1).
 TOOLS: list[dict] = [
     REGISTRAR_GASTO,
+    REGISTRAR_INGRESO,
+    CONFIGURAR_INGRESO_RECURRENTE,
     CONSULTAR_PRESUPUESTO,
     RESPONDER_SOPORTE,
     CREAR_TICKET,
