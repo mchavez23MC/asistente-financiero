@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Bienvenido</title>
+  <link rel="stylesheet" href="assets/css/tokens.css">
+  <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+  <main class="auth">
+    <div class="auth__card">
+      <div class="steps mb-24" id="steps">
+        <span class="steps__bar is-on"></span><span class="steps__bar"></span><span class="steps__bar"></span>
+        <span class="steps__bar"></span><span class="steps__bar"></span>
+      </div>
+
+      <!-- B1 Bienvenida -->
+      <section class="card center ob" data-step="0">
+        <div class="avatar avatar--gold avatar--lg" style="margin:0 auto 16px">L</div>
+        <h1 class="t-h1 mb-8">Hola, soy Luca 👋</h1>
+        <p class="muted mb-24">Tu plata, clara. Te ayudo con tres cosas:</p>
+        <div class="stack" style="text-align:left">
+          <div class="row gap-8"><div class="cat-chip">📝</div><div><strong>Registro sin fricción</strong><div class="muted t-label">Escribes "gasté 25 en comida" y listo.</div></div></div>
+          <div class="row gap-8"><div class="cat-chip">🔔</div><div><strong>Te aviso antes</strong><div class="muted t-label">Detecto tus patrones y te alerto a tiempo.</div></div></div>
+          <div class="row gap-8"><div class="cat-chip">🎧</div><div><strong>Te ayudo de verdad</strong><div class="muted t-label">Y cuando no sé algo, te paso con una persona.</div></div></div>
+        </div>
+        <button class="btn btn--primary btn--block mt-24" data-next>Empecemos</button>
+      </section>
+
+      <!-- B2 Datos base -->
+      <section class="card hide ob" data-step="1">
+        <h1 class="t-h2 mb-16">Cuéntame lo básico</h1>
+        <div class="field"><label class="field__label">¿Cómo te llamamos?</label><input class="input" id="ob-name" value="Mateo"></div>
+        <div class="field"><label class="field__label">País</label><select class="select"><option>🇪🇨 Ecuador</option><option>🇵🇪 Perú</option><option>🇨🇴 Colombia</option></select></div>
+        <div class="grid grid-2">
+          <div class="field"><label class="field__label">Moneda</label><input class="input" value="USD ($)" disabled></div>
+          <div class="field"><label class="field__label">Zona horaria</label><input class="input" value="Guayaquil" disabled></div>
+        </div>
+        <button class="btn btn--primary btn--block mt-8" data-next>Continuar</button>
+      </section>
+
+      <!-- B3 WhatsApp -->
+      <section class="card center hide ob" data-step="2">
+        <h1 class="t-h2 mb-8">Vincula tu WhatsApp</h1>
+        <p class="muted t-label mb-16">Ahí es donde le hablas a Luca en tu día a día.</p>
+        <div style="width:150px;height:150px;margin:0 auto 12px;border:1px solid var(--luca-border);border-radius:12px;display:grid;place-items:center;color:var(--luca-navy)" id="qr"></div>
+        <div class="row gap-6 center" style="justify-content:center"><span class="badge badge--outline" id="wa-status">Esperando tu primer mensaje…</span></div>
+        <a class="btn btn--primary btn--block mt-16" id="wa-open" href="#">Abrir WhatsApp</a>
+        <button class="btn btn--ghost btn--block mt-8" data-next>Puedo usar solo la web →</button>
+      </section>
+
+      <!-- B4 Primer presupuesto -->
+      <section class="card hide ob" data-step="3">
+        <h1 class="t-h2 mb-8">Crea tu primer presupuesto</h1>
+        <p class="muted t-label mb-16">Un límite le dice a Luca cuándo avisarte. Elige uno para empezar.</p>
+        <div class="stack" id="budget-choices">
+          <label class="card row-between" style="cursor:pointer;padding:12px"><span class="row gap-8"><span class="cat-chip">🍔</span> Restaurantes</span><span class="row gap-6"><span class="muted t-label">$</span><input class="input input-amount" style="width:80px;height:38px" value="200"></span></label>
+          <label class="card row-between" style="cursor:pointer;padding:12px"><span class="row gap-8"><span class="cat-chip">🚕</span> Transporte</span><span class="row gap-6"><span class="muted t-label">$</span><input class="input input-amount" style="width:80px;height:38px" value="80"></span></label>
+          <label class="card row-between" style="cursor:pointer;padding:12px"><span class="row gap-8"><span class="cat-chip">🛒</span> Súper</span><span class="row gap-6"><span class="muted t-label">$</span><input class="input input-amount" style="width:80px;height:38px" value="260"></span></label>
+        </div>
+        <button class="btn btn--primary btn--block mt-16" data-next>Guardar y seguir</button>
+        <button class="btn btn--ghost btn--block mt-8" data-next>Saltar por ahora</button>
+      </section>
+
+      <!-- B5 Datos -->
+      <section class="card hide ob" data-step="4">
+        <h1 class="t-h2 mb-8">¿Y tus datos?</h1>
+        <p class="muted t-label mb-16">Puedes empezar de cero o probar con datos de ejemplo.</p>
+        <div class="stack">
+          <button class="card row gap-8" style="text-align:left;width:100%" data-finish><span class="cat-chip">📥</span><span><strong>Importar CSV bancario</strong><div class="muted t-label">Sube tu estado de cuenta.</div></span></button>
+          <button class="card row gap-8" style="text-align:left;width:100%;border-color:var(--luca-gold)" data-finish><span class="cat-chip">✨</span><span><strong>Probar con datos demo</strong><div class="muted t-label">Un mes de ejemplo, con alertas ya activas. Ideal para explorar.</div></span></button>
+          <button class="card row gap-8" style="text-align:left;width:100%" data-finish><span class="cat-chip">🌱</span><span><strong>Empezar de cero</strong><div class="muted t-label">Registra tu primer gasto en el chat.</div></span></button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script>
+    document.getElementById('qr').innerHTML = LUCA.icon('qr', '') .replace('class="ico ', 'style="width:110px;height:110px" class="');
+    document.getElementById('wa-open').innerHTML = LUCA.icon('chat') + ' Abrir WhatsApp';
+    document.getElementById('wa-open').addEventListener('click', function (e) { e.preventDefault(); var s = document.getElementById('wa-status'); s.className = 'badge badge--done'; s.innerHTML = LUCA.icon('check') + 'Vinculado'; LUCA.toast('¡WhatsApp vinculado!'); });
+
+    var step = 0;
+    var sections = document.querySelectorAll('.ob');
+    var bars = document.querySelectorAll('#steps .steps__bar');
+    function go(n) {
+      step = n;
+      sections.forEach(function (s, i) { s.classList.toggle('hide', i !== n); });
+      bars.forEach(function (b, i) { b.classList.toggle('is-on', i <= n); });
+      window.scrollTo(0, 0);
+    }
+    document.querySelectorAll('[data-next]').forEach(function (b) { b.addEventListener('click', function () { if (step < sections.length - 1) go(step + 1); }); });
+    document.querySelectorAll('[data-finish]').forEach(function (b) { b.addEventListener('click', function () { LUCA.toast('¡Todo listo! Bienvenido a Luca'); setTimeout(function () { location.href = 'app/inicio.html'; }, 700); }); });
+  </script>
+</body>
+</html>

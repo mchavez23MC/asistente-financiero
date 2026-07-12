@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Iniciar sesión</title>
+  <link rel="stylesheet" href="assets/css/tokens.css">
+  <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+  <main class="auth">
+    <div class="auth__card">
+      <div class="auth__brand">
+        <div class="auth__logo">Luca</div>
+        <div class="auth__tagline">Tu plata, clara con Luca.</div>
+      </div>
+
+      <div class="card">
+        <h1 class="t-h2 mb-16">Inicia sesión</h1>
+
+        <form id="login-form" novalidate>
+          <div class="field">
+            <label class="field__label" for="phone">Teléfono (el mismo de tu WhatsApp)</label>
+            <div class="input-group">
+              <span class="input-group__prefix">🇪🇨 +593</span>
+              <input class="input" id="phone" type="tel" inputmode="numeric" placeholder="98 765 1234" autocomplete="tel">
+            </div>
+            <div class="field__error" id="phone-err"></div>
+          </div>
+
+          <button class="btn btn--primary btn--block" type="submit">Entrar</button>
+          <p class="muted t-micro mt-8">Tu identidad es tu número, igual que en WhatsApp.
+            Verás los mismos gastos y presupuestos que registras por el chat.</p>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script>
+    // Sesión activa → directo a la app.
+    if (LUCA.phone()) location.href = 'app/inicio.html';
+
+    var form = document.getElementById('login-form');
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var phone = document.getElementById('phone');
+      var pf = phone.closest('.field');
+      var digits = phone.value.replace(/\D/g, '');
+      // Acepta '+593…' completo o el número local (se antepone +593).
+      var full = phone.value.trim().startsWith('+') ? '+' + digits
+               : '+593' + digits.replace(/^0/, '');
+      if (!/^\+[1-9]\d{7,14}$/.test(full)) {
+        pf.classList.add('is-error');
+        document.getElementById('phone-err').innerHTML = LUCA.icon('alert') + 'Ingresa un número válido';
+        phone.classList.add('is-error');
+        return;
+      }
+      pf.classList.remove('is-error'); phone.classList.remove('is-error');
+      LUCA.setPhone(full);
+      LUCA.toast('¡Hola! Entrando…');
+      setTimeout(function () { location.href = 'app/inicio.html'; }, 500);
+    });
+  </script>
+</body>
+</html>

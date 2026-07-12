@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Soporte y ayuda</title>
+  <link rel="stylesheet" href="../assets/css/tokens.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body>
+  <div class="layout">
+    <aside id="app-sidebar"></aside>
+    <div class="content">
+      <header id="app-topbar"></header>
+      <main class="page page--narrow">
+        <h1 class="t-h1 mb-16">¿En qué te ayudamos?</h1>
+
+        <div class="input-group mb-8" style="height:52px">
+          <span class="input-group__prefix" id="s-ico" style="height:52px"></span>
+          <input class="input" id="help-search" placeholder="Busca una pregunta…" style="font-size:16px">
+        </div>
+
+        <div id="search-answer" class="hide mb-16"></div>
+
+        <div id="browse">
+          <div class="grid grid-2 mb-24" id="help-cats"></div>
+
+          <h2 class="t-h2 mb-8">Preguntas frecuentes</h2>
+          <div class="card card--pad0" style="padding:0 18px"><div id="faq-list"></div></div>
+
+          <div class="card mt-16 row-between" style="background:var(--luca-navy-50);border:0">
+            <div><div class="t-label">¿No encuentras lo que buscas?</div><div class="muted t-micro">Luca resuelve la mayoría al instante.</div></div>
+            <a class="btn btn--primary btn--sm" href="chat.html">Pregúntale a Luca</a>
+          </div>
+          <div class="center mt-16"><a href="tickets.html" class="t-label">Ver mis tickets →</a></div>
+        </div>
+
+        <!-- Artículo -->
+        <div id="article" class="hide">
+          <button class="btn btn--ghost btn--sm mb-16" id="back-btn">← Volver</button>
+          <div class="card">
+            <div class="muted t-micro mb-8" id="art-crumb"></div>
+            <h2 class="t-h1 mb-16" id="art-title"></h2>
+            <p id="art-body"></p>
+            <div class="row-between mt-24" style="border-top:1px solid var(--luca-border);padding-top:16px">
+              <span class="t-label">¿Te sirvió?</span>
+              <div class="row gap-8"><button class="iconbtn" id="art-yes"></button><button class="iconbtn" id="art-no"></button></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <nav id="app-bottomnav"></nav>
+
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/ui.js"></script>
+  <script src="../assets/js/shell.js"></script>
+  <script>
+    LUCA.shell({ active: 'soporte', title: 'Soporte y ayuda' });
+    document.getElementById('s-ico').innerHTML = LUCA.icon('search');
+
+    document.getElementById('help-cats').innerHTML = LUCA.helpCategories.map(function (c) {
+      return '<a class="help-cat" href="#">' + LUCA.icon(c.icon) + '<div><div class="t-label">' + c.title + '</div><div class="muted t-micro">' + c.count + ' artículos</div></div></a>';
+    }).join('');
+
+    document.getElementById('faq-list').innerHTML = LUCA.helpArticles.map(function (a) {
+      return '<button class="lrow" data-art="' + a.id + '" style="width:100%;background:none;border:0;border-bottom:1px solid var(--luca-border);text-align:left"><div class="lrow__main"><div class="lrow__title">' + a.title + '</div><div class="lrow__meta">' + a.cat + '</div></div>' + LUCA.icon('chevron-right', 'muted') + '</button>';
+    }).join('');
+
+    document.getElementById('faq-list').addEventListener('click', function (e) { var b = e.target.closest('[data-art]'); if (b) openArticle(b.dataset.art); });
+
+    function openArticle(id) {
+      var a = LUCA.helpArticles.find(function (x) { return x.id === id; }); if (!a) return;
+      document.getElementById('art-crumb').textContent = 'Ayuda · ' + a.cat;
+      document.getElementById('art-title').textContent = a.title;
+      document.getElementById('art-body').textContent = a.body;
+      document.getElementById('browse').classList.add('hide');
+      document.getElementById('search-answer').classList.add('hide');
+      document.getElementById('article').classList.remove('hide');
+      window.scrollTo(0, 0);
+    }
+    document.getElementById('back-btn').addEventListener('click', function () { document.getElementById('article').classList.add('hide'); document.getElementById('browse').classList.remove('hide'); document.getElementById('help-search').value = ''; });
+    document.getElementById('art-yes').innerHTML = LUCA.icon('thumbs-up');
+    document.getElementById('art-no').innerHTML = LUCA.icon('thumbs-down');
+    document.getElementById('art-yes').addEventListener('click', function () { LUCA.toast('¡Gracias por tu opinión!'); });
+    document.getElementById('art-no').addEventListener('click', function () { LUCA.toast('Gracias. ¿Lo hablamos con Luca?', { action: 'Ir al chat', onAction: function () { location.href = 'chat.html'; } }); });
+
+    // búsqueda con respuesta directa (patrón 2026)
+    document.getElementById('help-search').addEventListener('input', function () {
+      var q = this.value.toLowerCase().trim();
+      var box = document.getElementById('search-answer');
+      if (q.length < 3) { box.classList.add('hide'); return; }
+      var match = LUCA.helpArticles.find(function (a) { return (a.title + ' ' + a.body).toLowerCase().includes(q); });
+      if (match) {
+        box.classList.remove('hide');
+        box.innerHTML = '<div class="card"><div class="badge badge--low mb-8"><span class="badge__dot"></span>Respuesta</div>' +
+          '<p class="mb-12">' + match.body + '</p>' +
+          '<button class="btn btn--outline btn--sm" data-art="' + match.id + '">Ver artículo completo</button>' +
+          '<div class="muted t-micro mt-12">¿No es lo que buscabas? <a href="chat.html">Pregúntale a Luca</a></div></div>';
+        box.querySelector('[data-art]').addEventListener('click', function () { openArticle(match.id); });
+      } else {
+        box.classList.remove('hide');
+        box.innerHTML = '<div class="card center"><p class="mb-12">No encontré un artículo exacto para eso.</p><a class="btn btn--primary btn--sm" href="chat.html">Pregúntale a Luca</a></div>';
+      }
+    });
+  </script>
+</body>
+</html>

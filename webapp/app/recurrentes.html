@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Recurrentes</title>
+  <link rel="stylesheet" href="../assets/css/tokens.css">
+  <link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body>
+  <div class="layout">
+    <aside id="app-sidebar"></aside>
+    <div class="content">
+      <header id="app-topbar"></header>
+      <main class="page page--narrow">
+        <div class="tabs" id="tabs">
+          <button class="is-on" data-tab="subs">Suscripciones</button>
+          <button data-tab="rem">Recordatorios</button>
+        </div>
+
+        <!-- Suscripciones -->
+        <section id="tab-subs">
+          <div class="card mb-16" style="background:var(--luca-navy-50);border:0">
+            <div class="row gap-8"><span class="cat-chip" style="background:var(--luca-bg)">📺</span>
+            <div><div class="t-label">Tus recurrentes suman</div><div class="amount-lg" id="rec-total"></div></div></div>
+          </div>
+
+          <div id="detected-wrap" class="mb-24"></div>
+
+          <h2 class="t-h2 mb-8">Confirmadas</h2>
+          <div class="card card--pad0" style="padding:0 18px"><div id="confirmed-list"></div></div>
+        </section>
+
+        <!-- Recordatorios -->
+        <section id="tab-rem" class="hide">
+          <div class="row-between mb-16"><p class="muted t-label" style="margin:0">Luca te avisa por WhatsApp o aquí en la web.</p><button class="btn btn--primary btn--sm" id="new-rem">Nuevo</button></div>
+          <div class="card card--pad0" style="padding:0 18px"><div id="rem-list"></div></div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <nav id="app-bottomnav"></nav>
+
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/ui.js"></script>
+  <script src="../assets/js/shell.js"></script>
+  <script>
+    LUCA.shell({ active: 'recurrentes', title: 'Recurrentes' });
+    var rec = LUCA.recurring;
+
+    document.getElementById('rec-total').innerHTML = '<span class="luca-amount">' + LUCA.fmt(rec.confirmed.reduce(function (a, r) { return a + r.amount; }, 0)) + '</span> <span class="muted t-label" style="font-size:13px">/ mes</span>';
+
+    // detectadas
+    document.getElementById('detected-wrap').innerHTML = !rec.detected.length ? '' :
+      '<div class="banner banner--info mb-8"><span>' + LUCA.icon('sparkles') + '</span>Luca detectó posibles suscripciones</div>' +
+      rec.detected.map(function (r) {
+        return '<div class="card row-between mb-8"><span class="row gap-8"><span class="cat-chip">' + r.emoji + '</span><span><div class="t-label">' + r.name + '</div><div class="muted t-micro">' + LUCA.fmt(r.amount) + ' · ' + r.freq + '</div></span></span>' +
+          '<span class="row gap-6"><button class="btn btn--primary btn--sm" data-confirm="' + r.name + '">Confirmar</button><button class="btn btn--ghost btn--sm" data-reject="' + r.name + '">No</button></span></div>';
+      }).join('');
+    document.querySelectorAll('[data-confirm]').forEach(function (b) { b.addEventListener('click', function () { b.closest('.card').remove(); LUCA.toast('Marcada como recurrente'); }); });
+    document.querySelectorAll('[data-reject]').forEach(function (b) { b.addEventListener('click', function () { b.closest('.card').remove(); LUCA.toast('Ok, no la marco'); }); });
+
+    // confirmadas
+    document.getElementById('confirmed-list').innerHTML = rec.confirmed.map(function (r) {
+      return '<div class="lrow"><div class="cat-chip">' + r.emoji + '</div>' +
+        '<div class="lrow__main"><div class="lrow__title">' + r.name + '</div><div class="lrow__meta">' + r.freq + ' · próximo cobro ' + LUCA.relDate(r.next) + '</div></div>' +
+        '<div class="row gap-8"><span class="luca-amount">' + LUCA.fmt(r.amount) + '</span><label class="switch"><input type="checkbox" checked><span class="switch__track"></span></label></div></div>';
+    }).join('');
+
+    // recordatorios
+    document.getElementById('rem-list').innerHTML = LUCA.reminders.map(function (r) {
+      return '<div class="lrow"><div class="cat-chip cat-chip--sm">' + LUCA.icon('bell') + '</div>' +
+        '<div class="lrow__main"><div class="lrow__title">' + r.title + '</div><div class="lrow__meta">' + r.text + ' · ' + r.when + '</div></div>' +
+        '<label class="switch"><input type="checkbox" ' + (r.on ? 'checked' : '') + '><span class="switch__track"></span></label></div>';
+    }).join('');
+    document.getElementById('new-rem').addEventListener('click', function () { LUCA.toast('Nuevo recordatorio (demo)', { type: 'info' }); });
+    document.querySelectorAll('#rem-list .switch input, #confirmed-list .switch input').forEach(function (i) { i.addEventListener('change', function () { LUCA.toast(i.checked ? 'Recordatorio activado' : 'Recordatorio desactivado'); }); });
+
+    document.getElementById('tabs').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-tab]'); if (!b) return;
+      this.querySelectorAll('button').forEach(function (x) { x.classList.remove('is-on'); }); b.classList.add('is-on');
+      document.getElementById('tab-subs').classList.toggle('hide', b.dataset.tab !== 'subs');
+      document.getElementById('tab-rem').classList.toggle('hide', b.dataset.tab !== 'rem');
+    });
+    if (location.hash === '#recordatorios') document.querySelector('[data-tab="rem"]').click();
+  </script>
+</body>
+</html>

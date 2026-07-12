@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Recuperar contraseña</title>
+  <link rel="stylesheet" href="assets/css/tokens.css">
+  <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+  <main class="auth">
+    <div class="auth__card">
+      <div class="auth__brand"><div class="auth__logo">Luca</div></div>
+
+      <!-- Paso 1: solicitud -->
+      <div class="card" id="r1">
+        <h1 class="t-h2 mb-8">Recupera tu acceso</h1>
+        <p class="muted t-label mb-16">Te enviamos un código para restablecer tu contraseña.</p>
+        <div class="field">
+          <label class="field__label" for="rid">Teléfono o correo</label>
+          <input class="input" id="rid" type="text" placeholder="+593 98 765 1234">
+        </div>
+        <button class="btn btn--primary btn--block" id="send-code">Enviar código</button>
+        <p class="center muted t-micro mt-16">Por tu seguridad, no te decimos si la cuenta existe.</p>
+        <p class="center muted t-label mt-16"><a href="index.html">Volver a iniciar sesión</a></p>
+      </div>
+
+      <!-- Paso 2: OTP -->
+      <div class="card hide" id="r2">
+        <h1 class="t-h2 mb-8">Ingresa el código</h1>
+        <p class="muted t-label mb-24">Si la cuenta existe, te enviamos un código de 6 dígitos.</p>
+        <div class="otp mb-16" id="rotp">
+          <input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1">
+          <input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1"><input inputmode="numeric" maxlength="1">
+        </div>
+        <button class="btn btn--primary btn--block" id="verify-code">Verificar</button>
+        <button class="btn btn--ghost btn--sm btn--block mt-8" id="rresend">Reenviar código</button>
+      </div>
+
+      <!-- Paso 3: nueva contraseña -->
+      <div class="card hide" id="r3">
+        <h1 class="t-h2 mb-16">Crea una nueva contraseña</h1>
+        <div class="field">
+          <label class="field__label" for="np1">Nueva contraseña</label>
+          <div class="password-wrap">
+            <input class="input" id="np1" type="password" placeholder="Mínimo 8 caracteres">
+            <button type="button" class="iconbtn toggle" data-pw-toggle="np1" style="border:0;background:none"></button>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="np2">Confirmar contraseña</label>
+          <input class="input" id="np2" type="password" placeholder="Repite la contraseña">
+        </div>
+        <button class="btn btn--primary btn--block" id="save-pw">Guardar</button>
+      </div>
+
+      <!-- Paso 4: éxito -->
+      <div class="card hide center" id="r4">
+        <div class="empty__art" style="background:var(--luca-income-bg);color:var(--luca-income)"><span id="ok-ico"></span></div>
+        <h1 class="t-h2 mb-8">¡Contraseña actualizada!</h1>
+        <p class="muted t-label mb-24">Ya puedes entrar con tu nueva contraseña.</p>
+        <a class="btn btn--primary btn--block" href="index.html">Ir a iniciar sesión</a>
+      </div>
+    </div>
+  </main>
+
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script>
+    LUCA.bindPasswordToggles();
+    LUCA.bindOtp(document.getElementById('rotp'));
+    document.getElementById('ok-ico').innerHTML = LUCA.icon('check-circle');
+    function show(id) { ['r1', 'r2', 'r3', 'r4'].forEach(function (x) { document.getElementById(x).classList.add('hide'); }); document.getElementById(id).classList.remove('hide'); }
+
+    document.getElementById('send-code').addEventListener('click', function () {
+      if (!document.getElementById('rid').value.trim()) return LUCA.toast('Ingresa tu teléfono o correo', { type: 'error' });
+      LUCA.toast('Si la cuenta existe, te enviamos un código'); show('r2'); document.querySelector('#rotp input').focus();
+    });
+    document.getElementById('rresend').addEventListener('click', function () { LUCA.toast('Código reenviado'); });
+    document.getElementById('verify-code').addEventListener('click', function () {
+      var filled = Array.prototype.every.call(document.querySelectorAll('#rotp input'), function (i) { return i.value; });
+      if (!filled) return LUCA.toast('Completa los 6 dígitos', { type: 'error' });
+      show('r3');
+    });
+    document.getElementById('save-pw').addEventListener('click', function () {
+      var a = document.getElementById('np1').value, b = document.getElementById('np2').value;
+      if (a.length < 8) return LUCA.toast('Mínimo 8 caracteres', { type: 'error' });
+      if (a !== b) return LUCA.toast('Las contraseñas no coinciden', { type: 'error' });
+      show('r4');
+    });
+  </script>
+</body>
+</html>

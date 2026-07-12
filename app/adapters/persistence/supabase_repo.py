@@ -181,10 +181,30 @@ class SupabaseRepository:
         )
         return Transaction(**res.data[0]) if res.data else None
 
+    def list_transactions(self, user_id: UUID, limit: int = 50) -> list[Transaction]:
+        res = (
+            self._db.table("transactions")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return [Transaction(**row) for row in res.data]
+
     # --- presupuesto (H2) — el sistema calcula; Claude explica (§1.2) ---------
     def get_budgets(self, user_id: UUID) -> list[Budget]:
         res = self._db.table("budgets").select("*").eq("user_id", str(user_id)).execute()
         return [Budget(**row) for row in res.data]
+
+    def save_budget(self, budget: Budget) -> Budget:
+        # Upsert sobre la unicidad (user_id, categoria, periodo) del schema.
+        res = (
+            self._db.table("budgets")
+            .upsert(_dump(budget), on_conflict="user_id,categoria,periodo")
+            .execute()
+        )
+        return Budget(**res.data[0])
 
     def sum_gastos(
         self,
