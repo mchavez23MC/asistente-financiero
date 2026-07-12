@@ -30,7 +30,13 @@ class Settings:
     groq_model: str
     supabase_url: str
     supabase_key: str
-    # WhatsApp Cloud API (Meta) — reemplaza a Twilio.
+    # WhatsApp vía Twilio — canal ACTIVO.
+    twilio_account_sid: str
+    twilio_auth_token: str
+    twilio_whatsapp_from: str
+    twilio_validate_signature: bool
+    public_base_url: str
+    # WhatsApp Cloud API (Meta) — conservado como EJEMPLO (no se cablea). Opcional.
     whatsapp_token: str
     whatsapp_phone_number_id: str
     whatsapp_verify_token: str
@@ -55,9 +61,19 @@ class Settings:
             groq_model=os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b"),
             supabase_url=_req("SUPABASE_URL"),
             supabase_key=_req("SUPABASE_KEY"),
-            whatsapp_token=_req("WHATSAPP_TOKEN"),
-            whatsapp_phone_number_id=_req("WHATSAPP_PHONE_NUMBER_ID"),
-            whatsapp_verify_token=_req("WHATSAPP_VERIFY_TOKEN"),
+            # Twilio (canal activo): requerido.
+            twilio_account_sid=_req("TWILIO_ACCOUNT_SID"),
+            twilio_auth_token=_req("TWILIO_AUTH_TOKEN"),
+            twilio_whatsapp_from=_req("TWILIO_WHATSAPP_FROM"),
+            twilio_validate_signature=os.environ.get(
+                "TWILIO_VALIDATE_SIGNATURE", "false"
+            ).lower()
+            in ("1", "true", "yes"),
+            public_base_url=os.environ.get("PUBLIC_BASE_URL", ""),
+            # Meta (ejemplo, no se cablea): opcional, defaults vacíos.
+            whatsapp_token=os.environ.get("WHATSAPP_TOKEN", ""),
+            whatsapp_phone_number_id=os.environ.get("WHATSAPP_PHONE_NUMBER_ID", ""),
+            whatsapp_verify_token=os.environ.get("WHATSAPP_VERIFY_TOKEN", ""),
             whatsapp_app_secret=os.environ.get("WHATSAPP_APP_SECRET", ""),
             graph_api_version=os.environ.get("GRAPH_API_VERSION", "v21.0"),
             guardrail_umbral_confianza=float(

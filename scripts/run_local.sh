@@ -8,7 +8,7 @@
 # (authtoken en https://dashboard.ngrok.com/get-started/your-authtoken)
 #
 # Dominio estático (URL fija para la demo): reclámalo en dashboard.ngrok.com/domains
-# y pásalo por NGROK_DOMAIN para que la Callback URL de Meta no cambie nunca.
+# y pásalo por NGROK_DOMAIN para que la Callback URL de Twilio no cambie nunca.
 set -euo pipefail
 
 PORT="${PORT:-8080}"
@@ -29,8 +29,8 @@ fi
 echo "✓ Servidor local sano en http://127.0.0.1:${PORT}/health"
 
 echo "▶ Abriendo túnel público con ${TUNNEL} → :${PORT}"
-echo "  Copia la URL https://... y pégala en Meta → WhatsApp → Configuration"
-echo "  como Callback URL:  https://<URL>/webhook/whatsapp"
+echo "  Copia la URL https://... y pégala en Twilio → Messaging → WhatsApp Sandbox"
+echo "  como 'When a message comes in':  https://<URL>/webhook/whatsapp  (método POST)"
 echo
 if [ "${TUNNEL}" = "cloudflared" ]; then
   exec cloudflared tunnel --url "http://localhost:${PORT}"

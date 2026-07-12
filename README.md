@@ -23,7 +23,7 @@ probados con fakes/LLMs scripteados (sin llamar a APIs reales en los tests).
 | Fase | Qué hace | Dónde |
 |---|---|---|
 | 1 | Contratos congelados: modelos, 5 puertos, tools | `app/domain/` + `db/schema.sql` |
-| 2 | Walking skeleton: orquestador + webhook + Supabase | `app/application/process_message.py`, `interfaces/api/webhook.py`, `adapters/persistence/` |
+| 2 | Walking skeleton: orquestador + webhook + Supabase | `app/application/process_message.py`, `interfaces/api/webhook_twilio.py`, `adapters/persistence/` |
 | 3 | Guardrail fail-closed en capas | `app/adapters/guardrail/` |
 | 4 | Agente principal Claude con tools (H1+H2) | `app/application/agents/principal.py` |
 | 5 | Soporte RAG con grounding (H3) | `app/application/agents/soporte_rag.py`, `app/kb/` |
@@ -50,8 +50,8 @@ responder el `200 OK` del webhook rápido y hacer el trabajo del LLM en backgrou
      un gasto *y* consultar presupuesto). Actúa como **cuarta capa** de revisión de
      sensibilidad.
    - **Audit trail** completo en `messages` (§7.4): input → intención → tool →
-     respuesta. La entrega por el canal es resiliente (un 4xx/5xx de Meta no tira
-     el webhook ni genera duplicados).
+     respuesta. La entrega por el canal es resiliente (un 4xx/5xx de Twilio no
+     tira el webhook ni genera duplicados).
 
 ### Tools del agente (contrato congelado, `app/domain/tools.py`)
 
@@ -66,8 +66,11 @@ responder el `200 OK` del webhook rápido y hacer el trabajo del LLM en backgrou
 
 ## Canales e interfaces
 
-- **WhatsApp Cloud API (Meta)** — `POST/GET /webhook/whatsapp` (verificación por
-  token + validación de firma `X-Hub-Signature-256`). Reemplazó a Twilio.
+- **WhatsApp vía Twilio** (canal activo) — `POST /webhook/whatsapp` (form-encoded;
+  firma opcional `X-Twilio-Signature`). Adaptador: `app/adapters/channels/whatsapp_twilio.py`.
+- **WhatsApp Cloud API (Meta)** — se conserva como **ejemplo** para empresas con
+  acceso directo a la Cloud API (`whatsapp_meta.py` + `interfaces/api/webhook.py`,
+  con handshake GET y firma `X-Hub-Signature-256`). **No se cablea** en `main.py`.
 - **Chat web (plan B)** — `GET /chat` + `POST /chat/send`, mismo núcleo, para
   demostrar sin depender de WhatsApp.
 - **Panel humano** — `/panel` (auth básica): cola de tickets, detalle, cambiar
@@ -99,27 +102,42 @@ cp .env.example .env    # rellenar las claves reales (ver comentarios del archiv
 #    (pega db/schema.sql en el SQL editor de Supabase)
 
 # 4. Correr los tests
-uv run --extra dev python -m pytest -q     # 63 passed
+uv run --extra dev python -m pytest -q     # 71 passed
 
 # 5. Levantar la app
 uv run uvicorn app.main:app --reload --port 8080
 ```
 
-### Exponer WhatsApp con túnel público (hosting actual)
+### Conectar WhatsApp (Twilio) con túnel público
 
-El hosting se movió de Fly.io a **local + túnel** (`scripts/run_local.sh`):
-arranca uvicorn si hace falta y abre un túnel público (ngrok por defecto,
-`cloudflared` opcional). Con un dominio estático de ngrok la Callback URL de Meta
-no cambia entre demos.
+El hosting es **local + túnel** (`scripts/run_local.sh`): arranca uvicorn si hace
+falta y abre un túnel público (ngrok por defecto, `cloudflared` opcional). Con un
+dominio estático de ngrok la Callback URL de Twilio no cambia entre demos.
 
 ```bash
 ./scripts/run_local.sh                          # ngrok (usa NGROK_DOMAIN si está)
 TUNNEL=cloudflared ./scripts/run_local.sh       # sin cuenta
 ```
 
-Luego pega en Meta → WhatsApp → Configuration la Callback URL
-`https://<URL>/webhook/whatsapp` y el `WHATSAPP_VERIFY_TOKEN` de tu `.env`.
+Configuración en Twilio (una vez):
 
+1. En [console.twilio.com](https://console.twilio.com) copia tu **Account SID** y
+   **Auth Token** → `TWILIO_ACCOUNT_SID` y `TWILIO_AUTH_TOKEN` en `.env`.
+2. Activa el **WhatsApp Sandbox** (Messaging → Try it out → Send a WhatsApp message)
+   y, desde tu teléfono, envía el código `join <palabra>` al número del sandbox para
+   unirte. Ese número compartido va en `TWILIO_WHATSAPP_FROM` (sandbox: `+14155238886`).
+3. En la config del Sandbox, pega en **"When a message comes in"** la URL del túnel
+   `https://<URL>/webhook/whatsapp` con método **POST**.
+4. (Producción) Para validar la firma de Twilio pon `TWILIO_VALIDATE_SIGNATURE=true`
+   y `PUBLIC_BASE_URL=https://<URL>` (debe coincidir exacto con la Callback URL).
+
+Ya puedes escribirle al número del sandbox desde WhatsApp y Luca responde.
+
+> **Volver a Meta:** el adaptador y el webhook de Meta siguen en el repo como
+> ejemplo. Para reactivarlo, en `app/main.py` importa `WhatsAppMetaAdapter` y el
+> router `webhook` en vez de sus equivalentes `*_twilio`, y define las variables
+> `WHATSAPP_*` del `.env`.
+>
 > `Dockerfile` y `fly.toml` se conservan por si se vuelve a Fly.io, pero el flujo
 > por defecto es el túnel. CI (`.github/workflows/ci.yml`) corre los tests en cada
 > push a `main` / PR.
@@ -135,7 +153,8 @@ nunca en la imagen ni en el repo. Variables clave (defaults y detalle en
 | Anthropic | `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`, `CLAUDE_MAX_TOKENS` |
 | Groq (guardrail) | `GROQ_API_KEY`, `GROQ_MODEL` |
 | Supabase | `SUPABASE_URL`, `SUPABASE_KEY` |
-| WhatsApp/Meta | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `GRAPH_API_VERSION` |
+| WhatsApp/Twilio (activo) | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`, `TWILIO_VALIDATE_SIGNATURE`, `PUBLIC_BASE_URL` |
+| WhatsApp/Meta (ejemplo, opcional) | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `GRAPH_API_VERSION` |
 | Guardrail | `GUARDRAIL_UMBRAL_CONFIANZA` (0.7), `GUARDRAIL_TIMEOUT_MS`, `GUARDRAIL_REINTENTOS`, `GUARDRAIL_BACKOFF_MS` |
 | Panel | `PANEL_USER`, `PANEL_PASSWORD` |
 | Scheduler | `SCHEDULER_HABILITADO`, `SCHEDULER_INTERVALO_MIN` |

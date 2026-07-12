@@ -318,9 +318,9 @@ def test_health_del_composition_root(monkeypatch):
         "GROQ_API_KEY": "test",
         "SUPABASE_URL": "http://supabase.invalid",
         "SUPABASE_KEY": "test",
-        "WHATSAPP_TOKEN": "EAAtest",
-        "WHATSAPP_PHONE_NUMBER_ID": "1234567890",
-        "WHATSAPP_VERIFY_TOKEN": "vt",
+        "TWILIO_ACCOUNT_SID": "ACtest",
+        "TWILIO_AUTH_TOKEN": "authtest",
+        "TWILIO_WHATSAPP_FROM": "+14155238886",
     }.items():
         monkeypatch.setenv(k, v)
 
