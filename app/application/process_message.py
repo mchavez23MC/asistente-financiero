@@ -30,27 +30,34 @@ from app.domain.models import (
 )
 from app.domain.ports import AgentRegistry, ChannelAdapter, Guardrail, Repository
 
-# Placeholder — la redacción final la coordina T6 (fase 2, paso 0).
+# Onboarding legal, en la voz de Luca (paso 0; redacción final la coordina T6).
 AVISO_LEGAL = (
-    "👋 Hola, soy tu asistente financiero. Antes de empezar: guardo tus mensajes "
-    "y transacciones para poder ayudarte, y un humano puede revisarlos si escalo "
-    "tu caso. No doy consejos de inversión. Al seguir escribiendo aceptas estos "
-    "términos. ¿En qué te ayudo?"
+    "👋 ¡Hola! Soy Luca, tu asistente financiero. Antes de arrancar: guardo tus "
+    "mensajes y gastos para poder ayudarte, y un humano de mi equipo puede "
+    "revisarlos si escalo tu caso. No doy consejos de inversión. Al seguir "
+    "escribiendo aceptas estos términos. ¿En qué te doy una mano?"
 )
 
+# Ruta sensible (pre-Luca): voz cálida de Luca, sin detalle de por qué se escala.
 RESPUESTA_SENSIBLE = (
-    "Tu consulta necesita atención de una persona de nuestro equipo. "
-    "Ya creé un caso y te contactaremos pronto. 🙋"
+    "Eso mejor lo ve alguien de mi equipo 🙌 — ya les pasé tu caso y te "
+    "contactan en breve. Mientras tanto, aquí sigo para lo de tus gastos."
 )
 
 # Groq caído/timeout (fail-closed §7.3.4): se pide reintento sin prometer humano.
 RESPUESTA_FAIL_CLOSED = (
-    "Dame un momento 🙏 — no pude procesar tu mensaje con seguridad. "
-    "Ya avisé al equipo; puedes intentar de nuevo en unos minutos."
+    "Dame un momentito 🙏 — no pude procesar tu mensaje con seguridad. "
+    "Ya avisé al equipo; prueba de nuevo en unos minutos, ñaño."
 )
 
 # categoria del guardrail → motivo del ticket (valores de MotivoEscalacion).
 _MOTIVOS_VALIDOS = {m.value for m in MotivoEscalacion}
+
+# El clasificador (documento de blindaje) fusiona reclamo+regulatorio en una sola
+# categoría; se traduce a un motivo válido del ticket.
+_CATEGORIA_CLASIFICADOR_A_MOTIVO = {
+    "reclamo_regulatorio": MotivoEscalacion.REGULATORIO,
+}
 
 
 def _motivo_de(veredicto: GuardrailResult) -> MotivoEscalacion:
@@ -58,6 +65,8 @@ def _motivo_de(veredicto: GuardrailResult) -> MotivoEscalacion:
         return MotivoEscalacion.GUARDRAIL_FAIL_CLOSED
     if veredicto.categoria in _MOTIVOS_VALIDOS:
         return MotivoEscalacion(veredicto.categoria)
+    if veredicto.categoria in _CATEGORIA_CLASIFICADOR_A_MOTIVO:
+        return _CATEGORIA_CLASIFICADOR_A_MOTIVO[veredicto.categoria]
     return MotivoEscalacion.OTRO
 
 
