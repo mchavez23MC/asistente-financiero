@@ -38,6 +38,8 @@ class Settings:
     graph_api_version: str
     guardrail_umbral_confianza: float
     guardrail_timeout_ms: int
+    guardrail_reintentos: int
+    guardrail_backoff_ms: int
     claude_max_tokens: int
     panel_user: str
     panel_password: str
@@ -61,7 +63,9 @@ class Settings:
             guardrail_umbral_confianza=float(
                 os.environ.get("GUARDRAIL_UMBRAL_CONFIANZA", "0.7")
             ),
-            guardrail_timeout_ms=int(os.environ.get("GUARDRAIL_TIMEOUT_MS", "800")),
+            guardrail_timeout_ms=int(os.environ.get("GUARDRAIL_TIMEOUT_MS", "1200")),
+            guardrail_reintentos=int(os.environ.get("GUARDRAIL_REINTENTOS", "1")),
+            guardrail_backoff_ms=int(os.environ.get("GUARDRAIL_BACKOFF_MS", "300")),
             claude_max_tokens=int(os.environ.get("CLAUDE_MAX_TOKENS", "1024")),
             panel_user=os.environ.get("PANEL_USER", "admin"),
             panel_password=os.environ.get("PANEL_PASSWORD", "cambiar-esto"),

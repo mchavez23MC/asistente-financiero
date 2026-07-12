@@ -47,6 +47,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         classifier=GroqClassifier(settings.groq_api_key, settings.groq_model),
         umbral_confianza=settings.guardrail_umbral_confianza,
         timeout_ms=settings.guardrail_timeout_ms,
+        reintentos=settings.guardrail_reintentos,
+        backoff_ms=settings.guardrail_backoff_ms,
     )
     claude = ClaudeProvider(
         settings.anthropic_api_key, settings.claude_model, settings.claude_max_tokens

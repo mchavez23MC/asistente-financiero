@@ -107,9 +107,31 @@ async def test_groq_caido_es_fail_closed():
 
 
 async def test_groq_colgado_es_fail_closed_por_timeout():
-    g = LayeredGuardrail(HangingClassifier(), timeout_ms=50)
+    g = LayeredGuardrail(HangingClassifier(), timeout_ms=50, reintentos=0)
     r = await g.classify("mensaje cualquiera")
     assert r.sensible and r.fuente == "fail_closed_timeout"
+
+
+class FallaUnaVez:
+    """Falla en el primer intento (throttling transitorio) y luego responde."""
+
+    def __init__(self, resultado: GuardrailResult) -> None:
+        self._resultado = resultado
+        self.llamadas = 0
+
+    async def classify(self, texto: str) -> GuardrailResult:
+        self.llamadas += 1
+        if self.llamadas == 1:
+            raise ConnectionError("429 rate limit")
+        return self._resultado
+
+
+async def test_reintento_se_recupera_de_fallo_transitorio():
+    clf = FallaUnaVez(_ok(0.95))
+    g = LayeredGuardrail(clf, reintentos=1, backoff_ms=1)
+    r = await g.classify("gasté 20 en comida")
+    assert not r.sensible and r.fuente == "clasificador"  # NO escaló a ticket
+    assert clf.llamadas == 2  # falló una vez, reintentó y funcionó
 
 
 # --- ruta sensible en el orquestador -------------------------------------------------
