@@ -41,14 +41,27 @@ async def recibir(request: Request, background: BackgroundTasks) -> Response:
     process_message = request.app.state.process_message
 
     incoming = channel.parse(params)
-    if incoming.telefono and incoming.texto:
+    if incoming.telefono and (incoming.texto or incoming.media):
         # Síncrono: consentimiento + guardrail (§7.5). None = ya atendido.
         context = await process_message.preprocess(incoming)
         if context is not None:
-            background.add_task(process_message.run_agent, context)
+            if incoming.media:
+                # La descarga de adjuntos (Basic Auth de Twilio) también va en
+                # background: el 200 no espera a la media ni al agente.
+                background.add_task(_descargar_media_y_correr, channel, process_message, context)
+            else:
+                background.add_task(process_message.run_agent, context)
 
     # Twilio espera 200 rápido (TwiML) para no reintentar el evento.
     return Response(content=_TWIML_VACIO, media_type="application/xml")
+
+
+async def _descargar_media_y_correr(channel, process_message, context) -> None:
+    """Background: baja los adjuntos del mensaje (fetch_media es tolerante a
+    fallos por adjunto) y recién ahí corre el agente, que arma los bloques
+    image/document para Claude con lo que sí se descargó."""
+    await channel.fetch_media(context.incoming)
+    await process_message.run_agent(context)
 
 
 def _firma_valida(request: Request, params: dict) -> bool:

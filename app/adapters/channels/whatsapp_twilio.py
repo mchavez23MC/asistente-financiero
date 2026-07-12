@@ -25,7 +25,13 @@ import logging
 
 import httpx
 
-from app.domain.models import IncomingMessage, User
+from app.domain.models import (
+    MEDIA_MAX_BYTES_IMAGEN,
+    MEDIA_MAX_BYTES_PDF,
+    IncomingMessage,
+    MediaItem,
+    User,
+)
 
 TWILIO_API_BASE = "https://api.twilio.com/2010-04-01"
 
@@ -65,14 +71,17 @@ class WhatsAppTwilioAdapter:
 
     def parse(self, payload: dict) -> IncomingMessage:
         """Normaliza el webhook (form-encoded → dict) de Twilio al formato
-        canónico. Si no hay cuerpo de texto, devuelve un mensaje vacío que el
-        webhook ignora (p.ej. eventos de status/entrega)."""
+        canónico. Un mensaje con imagen/documento (NumMedia > 0) es válido
+        aunque no traiga Body (foto de recibo sin caption). Si no hay ni texto
+        ni media, devuelve un mensaje vacío que el webhook ignora (p.ej.
+        eventos de status/entrega)."""
         remitente = str(payload.get("From", ""))
         telefono = self._from_whatsapp(remitente)
         texto = str(payload.get("Body", "") or "").strip()
         nombre = payload.get("ProfileName") or None
+        media = self._parse_media(payload)
 
-        if not telefono or not texto:
+        if not telefono or (not texto and not media):
             return IncomingMessage(canal=self.canal, telefono="", texto="", raw=payload)
 
         return IncomingMessage(
@@ -80,8 +89,57 @@ class WhatsAppTwilioAdapter:
             telefono=telefono,
             texto=texto,
             nombre_perfil=nombre,
+            media=media,
             raw=payload,
         )
+
+    @staticmethod
+    def _parse_media(payload: dict) -> list[MediaItem]:
+        """Twilio adjunta `NumMedia` y pares `MediaUrl{i}`/`MediaContentType{i}`.
+        Solo se capturan url + content-type; la descarga (requiere Basic Auth de
+        la cuenta) la hace `fetch_media` en background, después del 200."""
+        try:
+            num = int(payload.get("NumMedia", 0) or 0)
+        except (TypeError, ValueError):
+            num = 0
+        items: list[MediaItem] = []
+        for i in range(num):
+            url = payload.get(f"MediaUrl{i}")
+            if not url:
+                continue
+            items.append(
+                MediaItem(
+                    url=str(url),
+                    content_type=str(payload.get(f"MediaContentType{i}", "") or "").strip()
+                    or "application/octet-stream",
+                )
+            )
+        return items
+
+    async def fetch_media(self, incoming: IncomingMessage) -> None:
+        """Descarga los adjuntos soportados del mensaje (in place, llena
+        `data_base64`). Las URLs de media de Twilio requieren la misma Basic
+        Auth que la API de envío, por eso vive en el adaptador y no en el core.
+        Un adjunto que falla o excede el límite queda con data_base64=None y el
+        agente se lo dice al usuario — nunca tira el pipeline completo."""
+        for item in incoming.media:
+            if not item.url or not item.soportado or item.data_base64 is not None:
+                continue
+            try:
+                resp = await self._get_client().get(item.url, follow_redirects=True)
+                resp.raise_for_status()
+                limite = MEDIA_MAX_BYTES_IMAGEN if item.es_imagen else MEDIA_MAX_BYTES_PDF
+                if len(resp.content) > limite:
+                    log.warning(
+                        "Adjunto %s de %s excede el límite (%d bytes); se omite.",
+                        item.content_type,
+                        incoming.telefono,
+                        len(resp.content),
+                    )
+                    continue
+                item.data_base64 = base64.b64encode(resp.content).decode("ascii")
+            except Exception:
+                log.exception("No se pudo descargar el adjunto %s", item.url)
 
     async def send(self, user: User, text: str) -> None:
         to = self._to_whatsapp(user.telefono)

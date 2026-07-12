@@ -149,6 +149,38 @@ class SupabaseRepository:
         res = q.limit(1).execute()
         return Transaction(**res.data[0]) if res.data else None
 
+    def list_transactions(
+        self,
+        user_id: UUID,
+        limite: int = 5,
+        tipo: Optional[str] = None,
+        categoria: Optional[str] = None,
+    ) -> list[Transaction]:
+        q = (
+            self._db.table("transactions")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("status", "confirmada")
+        )
+        if tipo:
+            q = q.eq("tipo", tipo)
+        if categoria:
+            q = q.eq("categoria", categoria)
+        res = q.order("created_at", desc=True).limit(limite).execute()
+        return [Transaction(**row) for row in res.data]
+
+    def get_transaction(self, user_id: UUID, transaction_id: UUID) -> Optional[Transaction]:
+        # El .eq(user_id) es el aislamiento (§7.3.2): un id ajeno devuelve None.
+        res = (
+            self._db.table("transactions")
+            .select("*")
+            .eq("id", str(transaction_id))
+            .eq("user_id", str(user_id))
+            .limit(1)
+            .execute()
+        )
+        return Transaction(**res.data[0]) if res.data else None
+
     # --- presupuesto (H2) — el sistema calcula; Claude explica (§1.2) ---------
     def get_budgets(self, user_id: UUID) -> list[Budget]:
         res = self._db.table("budgets").select("*").eq("user_id", str(user_id)).execute()

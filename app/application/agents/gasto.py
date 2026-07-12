@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 from uuid import UUID
 
+from app.application.agents.transacciones import buscar_duplicado
 from app.domain.models import Transaction, TransactionStatus
 from app.domain.ports import Repository
 
@@ -38,6 +39,7 @@ def registrar_gasto(
     fecha: Optional[str] = None,
     categoria: Optional[str] = None,
     comercio: Optional[str] = None,
+    forzar: bool = False,
 ) -> dict:
     pendiente = repo.get_pending_transaction(user_id, tipo="gasto")
 
@@ -52,6 +54,25 @@ def registrar_gasto(
     faltantes = [c for c in OBLIGATORIOS if c == "monto" and monto_dec is None]
     confirmada = not faltantes
     fecha_val = _parse_fecha(fecha) or (date.today() if confirmada else None)
+
+    # Detección de duplicados: un registro NUEVO (no el que completa la
+    # pendiente) con mismo monto/fecha que uno reciente no se guarda; se le
+    # pregunta al usuario y él confirma con forzar=true.
+    if pendiente is None and confirmada and not forzar:
+        dup = buscar_duplicado(repo, user_id, "gasto", monto_dec, fecha_val)
+        if dup is not None:
+            return {
+                "status": "posible_duplicado",
+                "duplicado_de": {
+                    "transaction_id": str(dup.id),
+                    "monto": float(dup.monto),
+                    "fecha": dup.fecha.isoformat() if dup.fecha else None,
+                    "categoria": dup.categoria,
+                    "comercio": dup.comercio,
+                },
+                "nota": "NO se registró nada. Pregunta al usuario si es el mismo "
+                "movimiento; si dice que es otro, repite con forzar=true.",
+            }
 
     tx = Transaction(
         id=pendiente.id if pendiente else None,

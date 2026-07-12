@@ -1,9 +1,13 @@
 """Contrato de las tools del agente (con T1) — Fase 1, CONGELADO.
 
-Firma de las 4 tools que Claude puede invocar. Estas definiciones se pasan tal
+Firma de las tools que Claude puede invocar. Estas definiciones se pasan tal
 cual al SDK de Anthropic en fase 4 (`tools=TOOLS`). El *system prompt* sigue
 iterándose después, pero estos nombres/parámetros/retornos NO cambian sin
 renegociación explícita (§8.2).
+
+Renegociación (fase 10 — correcciones y media): se AÑADEN consultar_movimientos,
+editar_transaccion y eliminar_transaccion, y el parámetro `forzar` (detección de
+duplicados) a registrar_gasto/registrar_ingreso. Las firmas previas no cambian.
 
 INVARIANTE DE SEGURIDAD (§7.3.2): el `user_id` NUNCA es parámetro de ninguna
 tool. Lo resuelve el `Repository` desde el teléfono del webhook. Aunque el
@@ -44,12 +48,23 @@ REGISTRAR_GASTO = {
                 "type": "string",
                 "description": "Nombre del comercio o descripción corta.",
             },
+            "forzar": {
+                "type": "boolean",
+                "description": (
+                    "true SOLO si la tool ya devolvió 'posible_duplicado' y el "
+                    "usuario confirmó que es un movimiento distinto. Nunca en la "
+                    "primera llamada."
+                ),
+            },
         },
         "required": [],  # nada es obligatorio a nivel schema: el status maneja lo incompleto
     },
     # Retorno (documentado, no parte del schema de Anthropic):
     #   {"transaction_id": str, "status": "confirmada"|"pendiente_confirmacion",
     #    "faltantes": [str]}  -> lista de campos que aún faltan para confirmar.
+    #   Si detecta un posible duplicado (mismo monto/fecha/tipo ya registrado):
+    #   {"status": "posible_duplicado", "duplicado_de": {...}} SIN registrar nada;
+    #   pregunta al usuario y reintenta con forzar=true si él confirma.
 }
 
 # --- H1: registrar un ingreso (espejo de registrar_gasto) -------------------
@@ -92,12 +107,22 @@ REGISTRAR_INGRESO = {
                 "type": "string",
                 "description": "De dónde viene (empresa, cliente, 'venta de la bici'…).",
             },
+            "forzar": {
+                "type": "boolean",
+                "description": (
+                    "true SOLO si la tool ya devolvió 'posible_duplicado' y el "
+                    "usuario confirmó que es un movimiento distinto. Nunca en la "
+                    "primera llamada."
+                ),
+            },
         },
         "required": [],  # nada obligatorio a nivel schema: el status maneja lo incompleto
     },
     # Retorno documentado:
     #   {"transaction_id": str, "status": "confirmada"|"pendiente_confirmacion",
     #    "faltantes": [str], "total_categoria_periodo": number}
+    #   Puede devolver {"status": "posible_duplicado", "duplicado_de": {...}}
+    #   igual que registrar_gasto.
 }
 
 # --- H1: configurar un ingreso fijo mensual (sueldo base recurrente) ---------
@@ -198,6 +223,112 @@ RESPONDER_SOPORTE = {
     #   {"respuesta": str, "encontrado_en_corpus": bool, "cita": str|null}
 }
 
+# --- H1: consultar el historial de movimientos ------------------------------
+CONSULTAR_MOVIMIENTOS = {
+    "name": "consultar_movimientos",
+    "description": (
+        "Lista los últimos movimientos registrados del usuario (gastos y/o "
+        "ingresos), más recientes primero. Úsala para '¿qué anoté ayer?', "
+        "'muéstrame mis últimos 5 gastos', y SIEMPRE antes de editar o eliminar "
+        "una transacción, para obtener su transaction_id. Los números vienen del "
+        "sistema; no los recalcules."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "limite": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "description": "Cuántos movimientos listar. Por defecto 5.",
+            },
+            "tipo": {
+                "type": "string",
+                "enum": ["gasto", "ingreso", "todos"],
+                "description": "Filtrar por tipo. Por defecto 'todos'.",
+            },
+            "categoria": {
+                "type": "string",
+                "description": "Categoría específica, u omitir para todas.",
+            },
+        },
+        "required": [],
+    },
+    # Retorno documentado:
+    #   {"movimientos": [{"transaction_id": str, "tipo": str, "monto": number,
+    #     "fecha": str, "categoria": str|null, "comercio_o_fuente": str|null}],
+    #    "cuantos": int}
+}
+
+# --- H1: corregir una transacción ya registrada ------------------------------
+EDITAR_TRANSACCION = {
+    "name": "editar_transaccion",
+    "description": (
+        "Corrige una transacción ya registrada (monto, fecha, categoría, "
+        "comercio/fuente o tipo). Úsala cuando el usuario corrija algo que ya "
+        "quedó registrado: 'no, eran 20 no 32', 'cámbialo a Transporte'. "
+        "Necesitas el transaction_id: tómalo del retorno de registrar_gasto/"
+        "registrar_ingreso en esta conversación, o búscalo con "
+        "consultar_movimientos. Solo cambia los campos que envíes."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "transaction_id": {
+                "type": "string",
+                "description": "Id de la transacción a corregir.",
+            },
+            "monto": {"type": "number", "description": "Nuevo monto, positivo."},
+            "fecha": {
+                "type": "string",
+                "format": "date",
+                "description": "Nueva fecha (YYYY-MM-DD).",
+            },
+            "categoria": {"type": "string", "description": "Nueva categoría."},
+            "comercio": {
+                "type": "string",
+                "description": "Nuevo comercio (gasto) o fuente (ingreso).",
+            },
+            "tipo": {
+                "type": "string",
+                "enum": ["gasto", "ingreso"],
+                "description": "Solo si el usuario aclara que era ingreso y no gasto (o al revés).",
+            },
+        },
+        "required": ["transaction_id"],
+    },
+    # Retorno documentado:
+    #   {"transaction_id": str, "status": str, "monto": number, "fecha": str,
+    #    "categoria": str|null, "comercio": str|null, "tipo": str,
+    #    "total_categoria_periodo": number|null}
+    #   o {"error": "no_encontrada"} si el id no existe para este usuario.
+}
+
+# --- H1: eliminar (anular) una transacción -----------------------------------
+ELIMINAR_TRANSACCION = {
+    "name": "eliminar_transaccion",
+    "description": (
+        "Anula una transacción registrada ('borra el último gasto', 'ese no va'). "
+        "No borra la fila: la marca 'anulada' y deja de contar en presupuestos y "
+        "totales (queda rastro de auditoría). Necesitas el transaction_id (del "
+        "retorno de otra tool o de consultar_movimientos). Antes de anular, "
+        "confirma con el usuario CUÁL movimiento es, salvo que sea inequívoco."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "transaction_id": {
+                "type": "string",
+                "description": "Id de la transacción a anular.",
+            },
+        },
+        "required": ["transaction_id"],
+    },
+    # Retorno documentado:
+    #   {"transaction_id": str, "status": "anulada", "monto": number|null,
+    #    "categoria": str|null}  o  {"error": "no_encontrada"}.
+}
+
 # --- transversal: escalar a humano -----------------------------------------
 CREAR_TICKET = {
     "name": "crear_ticket",
@@ -243,6 +374,9 @@ TOOLS: list[dict] = [
     REGISTRAR_GASTO,
     REGISTRAR_INGRESO,
     CONFIGURAR_INGRESO_RECURRENTE,
+    CONSULTAR_MOVIMIENTOS,
+    EDITAR_TRANSACCION,
+    ELIMINAR_TRANSACCION,
     CONSULTAR_PRESUPUESTO,
     RESPONDER_SOPORTE,
     CREAR_TICKET,

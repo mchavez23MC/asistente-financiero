@@ -12,23 +12,32 @@ pasada porque el agente puede llamar varias tools (por eso la opción C, §1).
 from __future__ import annotations
 
 import json
+import logging
+from datetime import date
 from uuid import UUID
 
 from app.application.agents.gasto import registrar_gasto
 from app.application.agents.ingreso import configurar_ingreso_recurrente, registrar_ingreso
 from app.application.agents.presupuesto import consultar_presupuesto
 from app.application.agents.soporte_rag import SoporteRAG
+from app.application.agents.transacciones import (
+    consultar_movimientos,
+    editar_transaccion,
+    eliminar_transaccion,
+)
 from app.domain.models import (
     AgentContext,
     AgentResult,
+    IncomingMessage,
     Intencion,
-    Message,
     MotivoEscalacion,
     Ticket,
     TicketPrioridad,
 )
 from app.domain.ports import LLMProvider, Repository
 from app.domain.tools import TOOLS
+
+log = logging.getLogger("e5.agente")
 
 # System prompt de Luca — según el documento de comportamiento y blindaje
 # (Agente 2). Personalidad ecuatoriana + cuarta capa de revisión de sensibilidad.
@@ -59,12 +68,79 @@ conversación— con:
   mes se le recuerde registrarlo (tool: configurar_ingreso_recurrente).
   Esta tool NO registra el ingreso: solo guarda la configuración; el
   registro real lo confirma el usuario cuando el sistema le recuerde.
+- Mostrar sus movimientos ya registrados —"mis últimos 5 gastos", "¿qué
+  anoté ayer?"— (tool: consultar_movimientos)
+- Corregir o anular una transacción ya registrada (tools:
+  editar_transaccion, eliminar_transaccion)
 - Consultar su presupuesto, balance e insights (tool: consultar_presupuesto)
+- Procesar imágenes y documentos que te envíe (recibos, facturas,
+  capturas de transferencia, estados de cuenta) — ver la sección de
+  IMÁGENES Y DOCUMENTOS
 - Resolver dudas de soporte usando la base de conocimiento aprobada
   (tool: responder_soporte) — nunca inventes fuera de esos documentos
 - Escalar a un humano cuando el usuario lo pida explícitamente, cuando
   una tool lo requiera, o cuando tu propia revisión final detecte algo
   sensible que las capas anteriores no atraparon (tool: crear_ticket)
+
+## IMÁGENES Y DOCUMENTOS (recibos, facturas, capturas, estados de cuenta)
+El usuario puede mandarte una foto o un PDF en lugar de escribir.
+- Recibo, factura, voucher o captura de transferencia (UN movimiento):
+  extrae monto, fecha y comercio/fuente de lo que VES y regístralo con la
+  tool que corresponda (gasto o ingreso). Usa el total final del
+  documento (con impuestos), no los subtotales. En tu confirmación di lo
+  que leíste ("vi $32.50 en Supermaxi del 10 de julio") para que el
+  usuario pueda corregirte.
+- Si un dato clave no se lee con claridad (monto borroso, sin fecha), NO
+  lo inventes: registra lo que sí es claro y pregunta lo que falta, igual
+  que con un mensaje de texto incompleto.
+- Documento con VARIOS movimientos (estado de cuenta, historial): NO
+  registres nada de una. Resume lo que ves (cuántos movimientos, el
+  rango de fechas, los principales) y pregunta cuáles quiere registrar.
+  Solo tras su confirmación registra los elegidos, cada uno con su tool.
+- Si la imagen no tiene nada financiero (un meme, una foto cualquiera),
+  dilo con humor ligero y redirige a lo tuyo.
+- Si un adjunto no se pudo descargar o es de un tipo que no procesas
+  (audio, video), dilo con naturalidad y pide que lo mande como foto o
+  PDF, o que te escriba el dato.
+
+## HISTORIAL, CORRECCIONES Y ELIMINACIONES
+- "¿Qué anoté ayer?", "mis últimos gastos" → consultar_movimientos. Los
+  números vienen del sistema; nunca los recalcules ni los inventes.
+- Si el usuario corrige algo ya registrado ("no, eran 20 no 32",
+  "cámbialo a Transporte", "era ingreso, no gasto") → editar_transaccion
+  con el transaction_id del registro. Si acabas de registrarlo en esta
+  conversación ya tienes el id en el resultado de la tool; si no,
+  búscalo primero con consultar_movimientos.
+- "Borra el último gasto", "ese no va" → eliminar_transaccion. Si hay
+  cualquier ambigüedad sobre CUÁL movimiento es, confirma antes de
+  anular ("¿el de $32 en el súper de hoy?"). Anular no se deshace solo:
+  ante la duda, pregunta.
+- NUNCA pidas al usuario el transaction_id: es un dato interno. Tú lo
+  resuelves con las tools; con el usuario habla de montos, comercios y
+  fechas.
+
+## POSIBLES DUPLICADOS
+Si registrar_gasto o registrar_ingreso devuelve "posible_duplicado"
+(mismo monto y fecha que un registro reciente — típico cuando el usuario
+anota por texto y luego manda la foto del mismo recibo), NO quedó
+registrado nada: pregúntale si es el mismo movimiento. Si dice que es el
+mismo, no registres (ya está). Si dice que es otro, repite la tool con
+forzar=true.
+
+## SI UNA TOOL FALLA
+Si el resultado de una tool trae "error" (o la ejecución falló), NUNCA
+digas que quedó registrado o hecho. Dile con calidez que hubo un
+problema técnico y pídele que lo intente de nuevo en un momento; si el
+error persiste o el usuario se molesta, escala con crear_ticket. Nunca
+confirmes con ✅ algo que la tool no confirmó.
+
+## FECHAS RELATIVAS
+El sistema te dice la fecha de HOY en cada conversación. Interprétalas
+con esa referencia: "ayer" = hoy menos un día; "el lunes" = el lunes más
+reciente pasado (salvo que el contexto diga futuro); "el 5" = el día 5
+del mes actual (o del anterior si aún no llega). Pasa siempre la fecha
+resuelta en formato YYYY-MM-DD a las tools. Si la referencia es ambigua
+("en enero" estando en enero), pregunta.
 
 ## CATEGORÍAS (usa exactamente estas, elige la más cercana)
 Gastos: categoriza con naturalidad (comida, transporte, servicios, etc.).
@@ -136,7 +212,10 @@ Cada mensaje tuyo se registra junto con la intención detectada y la tool
 llamada. Sé consistente: si usas una tool, que corresponda genuinamente
 a la intención del usuario. Un mismo mensaje puede requerir varias tools
 (ej. registrar un gasto y consultar presupuesto): úsalas todas antes de
-responder.
+responder. Ejemplo cotidiano: "gasté 25 en el almuerzo y ¿cómo voy este
+mes?" → registrar_gasto(monto=25, categoria="comida") Y
+consultar_presupuesto(periodo="mensual"), y una sola respuesta que
+confirma el registro y explica el estado del presupuesto.
 
 ## LOOP DE CONFIRMACIÓN (H1)
 Si hay una transacción con estado "pendiente_confirmacion" para este
@@ -166,6 +245,11 @@ _INTENCION_POR_TOOL = {
     "registrar_gasto": Intencion.GASTO,
     "registrar_ingreso": Intencion.INGRESO,
     "configurar_ingreso_recurrente": Intencion.INGRESO,
+    # Correcciones/consultas de movimientos: se auditan como H1/H2 (el check de
+    # la tabla messages no admite intenciones nuevas sin migración).
+    "consultar_movimientos": Intencion.PRESUPUESTO,
+    "editar_transaccion": Intencion.GASTO,
+    "eliminar_transaccion": Intencion.GASTO,
     "consultar_presupuesto": Intencion.PRESUPUESTO,
     "responder_soporte": Intencion.SOPORTE,
 }
@@ -186,12 +270,32 @@ _MOTIVOS_VALIDOS = {m.value for m in MotivoEscalacion}
 _PRIORIDADES_VALIDAS = {p.value for p in TicketPrioridad}
 
 _ARGS_TOOL = {
-    "registrar_gasto": {"monto", "fecha", "categoria", "comercio"},
-    "registrar_ingreso": {"monto", "fecha", "categoria", "fuente"},
+    "registrar_gasto": {"monto", "fecha", "categoria", "comercio", "forzar"},
+    "registrar_ingreso": {"monto", "fecha", "categoria", "fuente", "forzar"},
     "configurar_ingreso_recurrente": {"accion", "monto", "categoria", "fuente", "dia_del_mes"},
+    "consultar_movimientos": {"limite", "tipo", "categoria"},
+    "editar_transaccion": {"transaction_id", "monto", "fecha", "categoria", "comercio", "tipo"},
+    "eliminar_transaccion": {"transaction_id"},
     "consultar_presupuesto": {"periodo", "categoria"},
     "responder_soporte": {"pregunta"},
 }
+
+# Días de la semana para el bloque de fecha (fechas relativas: "ayer", "el lunes").
+_DIAS_SEMANA = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+
+
+def _system_blocks() -> list[dict]:
+    """System = bloque estable cacheado + bloque dinámico con la fecha de HOY.
+    El breakpoint de caché queda en el bloque estable, así el prefijo (tools +
+    prompt) sigue haciendo hit aunque la fecha cambie cada día."""
+    hoy = date.today()
+    return _SYSTEM_CACHED + [
+        {
+            "type": "text",
+            "text": f"HOY es {_DIAS_SEMANA[hoy.weekday()]} {hoy.isoformat()}. Usa esta "
+            "fecha como referencia para 'hoy', 'ayer', 'el lunes', etc.",
+        }
+    ]
 
 
 class MainAgent:
@@ -210,13 +314,14 @@ class MainAgent:
         self._max_turns = max_turns
 
     async def handle(self, context: AgentContext) -> AgentResult:
-        messages = self._build_messages(context.historial, context.incoming.texto)
+        messages = self._build_messages(context)
         intencion = Intencion.OTRO
         ultima_tool: str | None = None
+        system = _system_blocks()
 
         for _ in range(self._max_turns):
             resp = await self._llm.complete(
-                messages=messages, tools=TOOLS, system=_SYSTEM_CACHED
+                messages=messages, tools=TOOLS, system=system
             )
             if not resp.tool_calls:
                 return AgentResult(
@@ -263,15 +368,16 @@ class MainAgent:
         bucle de tool use es idéntico (los turnos de tool no llevan texto para el
         usuario, o muy poco preámbulo). Al terminar llena `capture` con
         {respuesta, intencion, tool_llamada} para el audit trail (§7.4)."""
-        messages = self._build_messages(context.historial, context.incoming.texto)
+        messages = self._build_messages(context)
         intencion = Intencion.OTRO
         ultima_tool: str | None = None
         todo = ""  # todo el texto que vio el usuario, para auditar con fidelidad
+        system = _system_blocks()
 
         for _ in range(self._max_turns):
             resp = None
             async for kind, payload in self._llm.stream(
-                messages=messages, tools=TOOLS, system=_SYSTEM_CACHED
+                messages=messages, tools=TOOLS, system=system
             ):
                 if kind == "text":
                     todo += payload
@@ -317,22 +423,43 @@ class MainAgent:
             yield degradado
 
     # ------------------------------------------------------------------ internos
-    def _build_messages(self, historial: list[Message], texto_actual: str) -> list[dict]:
+    def _build_messages(self, context: AgentContext) -> list[dict]:
         """Historial → formato de mensajes de Anthropic. El último mensaje del
         usuario ya está en `historial` (lo guardó el orquestador); si por alguna
-        razón no lo está, se añade `texto_actual` como respaldo."""
+        razón no lo está, se añade el texto entrante como respaldo. Si el mensaje
+        actual trae imágenes/documentos, el último turno de usuario se arma con
+        bloques image/document + texto (el historial persistido solo guarda la
+        etiqueta '[imagen]'; el binario viaja únicamente en este request)."""
         messages: list[dict] = []
-        for m in historial:
+        for m in context.historial:
             rol = m.rol if isinstance(m.rol, str) else m.rol.value
             if rol == "user":
                 messages.append({"role": "user", "content": m.contenido})
             elif rol == "assistant":
                 messages.append({"role": "assistant", "content": m.contenido})
         if not messages or messages[-1]["role"] != "user":
-            messages.append({"role": "user", "content": texto_actual})
+            messages.append({"role": "user", "content": context.incoming.texto})
+
+        bloques = _bloques_media(context.incoming)
+        if bloques:
+            messages[-1] = {"role": "user", "content": bloques}
         return messages
 
     async def _ejecutar(self, nombre: str, argumentos: dict, context: AgentContext) -> dict:
+        """Despacha la tool. Cualquier excepción (Supabase caído, dato inválido…)
+        se devuelve como {"error": ...} en el tool_result — el prompt instruye a
+        Luca a NO confirmar nada ante un error, en vez de reventar el pipeline."""
+        try:
+            return await self._despachar(nombre, argumentos, context)
+        except Exception:
+            log.exception("Fallo ejecutando la tool %s", nombre)
+            return {
+                "error": "tool_fallo",
+                "detalle": f"La tool {nombre} falló por un problema técnico. NO quedó "
+                "registrado nada: díselo al usuario y pídele reintentar.",
+            }
+
+    async def _despachar(self, nombre: str, argumentos: dict, context: AgentContext) -> dict:
         uid: UUID = context.user.id
         if nombre in _ARGS_TOOL:
             argumentos = {k: v for k, v in argumentos.items() if k in _ARGS_TOOL[nombre]}
@@ -342,6 +469,12 @@ class MainAgent:
             return registrar_ingreso(self._repo, uid, **argumentos)
         if nombre == "configurar_ingreso_recurrente":
             return configurar_ingreso_recurrente(self._repo, uid, **argumentos)
+        if nombre == "consultar_movimientos":
+            return consultar_movimientos(self._repo, uid, **argumentos)
+        if nombre == "editar_transaccion":
+            return editar_transaccion(self._repo, uid, **argumentos)
+        if nombre == "eliminar_transaccion":
+            return eliminar_transaccion(self._repo, uid, **argumentos)
         if nombre == "consultar_presupuesto":
             return consultar_presupuesto(self._repo, uid, **argumentos)
         if nombre == "responder_soporte":
@@ -362,3 +495,55 @@ class MainAgent:
             )
         )
         return {"ticket_id": str(ticket.id), "estado": "abierto"}
+
+
+def _bloques_media(incoming: IncomingMessage) -> list[dict] | None:
+    """Adjuntos del mensaje → bloques de contenido de Anthropic (image /
+    document base64). Los adjuntos no descargados o no soportados se describen
+    en el bloque de texto para que Luca se lo explique al usuario. Devuelve
+    None si el mensaje no trae media (mensaje solo-texto: content = str)."""
+    if not incoming.media:
+        return None
+
+    bloques: list[dict] = []
+    notas: list[str] = []
+    for item in incoming.media:
+        if item.data_base64 and item.es_imagen:
+            bloques.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": item.content_type,
+                        "data": item.data_base64,
+                    },
+                }
+            )
+        elif item.data_base64 and item.es_pdf:
+            bloques.append(
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": item.data_base64,
+                    },
+                }
+            )
+        elif not item.soportado:
+            notas.append(
+                f"[El usuario adjuntó un archivo {item.content_type} que no puedes "
+                "procesar: pídele foto/PDF o el dato por texto.]"
+            )
+        else:
+            notas.append(
+                f"[Un adjunto {item.etiqueta} no se pudo descargar: pídele al "
+                "usuario que lo reenvíe.]"
+            )
+
+    partes = [incoming.texto] if incoming.texto else []
+    partes.extend(notas)
+    if not partes and bloques:
+        partes = ["(El usuario envió esto sin texto.)"]
+    bloques.append({"type": "text", "text": " ".join(partes)})
+    return bloques

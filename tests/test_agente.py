@@ -189,3 +189,98 @@ async def test_user_id_no_viaja_por_la_tool():
     # La consulta se hizo sobre el user del contexto, no sobre el inyectado.
     # (si user_id se hubiera colado, consultar_presupuesto habría fallado por kwarg)
     assert True
+
+
+# --- fallo de tool: el error llega al modelo, no revienta el pipeline --------------
+class _RepoQueFalla(FakeRepo):
+    def save_transaction(self, transaction):
+        raise RuntimeError("supabase caído")
+
+
+async def test_fallo_de_tool_devuelve_error_al_modelo():
+    """Si la tool revienta, el tool_result trae 'error' y el agente sigue vivo —
+    el prompt instruye a Luca a NO confirmar el registro."""
+    repo = _RepoQueFalla()
+    llm = ScriptedLLM(
+        [
+            _tool("registrar_gasto", {"monto": 25, "categoria": "comida"}),
+            _texto("Uy, tuve un problema técnico y no quedó registrado. ¿Intentas de nuevo?"),
+        ]
+    )
+    result = await _agente(llm, repo).handle(_contexto(repo, "gasté 25"))
+
+    tool_result = llm.llamadas[1]["messages"][-1]["content"][0]["content"]
+    assert "tool_fallo" in tool_result and "NO quedó" in tool_result
+    assert "no quedó registrado" in result.respuesta.lower()
+
+
+# --- system: la fecha de HOY viaja en un bloque aparte (no cacheado) --------------
+async def test_system_incluye_fecha_de_hoy_sin_romper_el_cache():
+    from datetime import date
+
+    repo = FakeRepo()
+    llm = ScriptedLLM([_texto("¡Hola!")])
+    await _agente(llm, repo).handle(_contexto(repo, "hola"))
+
+    system = llm.llamadas[0]["system"]
+    assert system[0]["cache_control"] == {"type": "ephemeral"}  # prefijo estable
+    assert date.today().isoformat() in system[1]["text"]  # bloque dinámico
+    assert "cache_control" not in system[1]
+
+
+# --- media: el último turno de usuario lleva bloques image/document ----------------
+async def test_mensaje_con_imagen_arma_bloques_para_claude():
+    from app.domain.models import MediaItem
+
+    repo = FakeRepo()
+    llm = ScriptedLLM(
+        [_tool("registrar_gasto", {"monto": 32.5, "comercio": "Supermaxi"}), _texto("Vi $32.50 en Supermaxi ✅")]
+    )
+    user = repo.get_or_create_user("+50370000000", "Ana")
+    ctx = AgentContext(
+        user=user,
+        incoming=IncomingMessage(
+            canal="whatsapp",
+            telefono=user.telefono,
+            texto="",
+            media=[MediaItem(content_type="image/jpeg", url="https://x", data_base64="Zm90bw==")],
+        ),
+        historial=[],
+    )
+    result = await _agente(llm, repo).handle(ctx)
+
+    # Nota: `llamadas` guarda la referencia a la lista que el bucle muta después;
+    # el turno del usuario con la imagen es el primero, no el último.
+    contenido = llm.llamadas[0]["messages"][0]["content"]
+    assert contenido[0]["type"] == "image"
+    assert contenido[0]["source"] == {
+        "type": "base64",
+        "media_type": "image/jpeg",
+        "data": "Zm90bw==",
+    }
+    assert contenido[-1]["type"] == "text"  # nota de contexto para el modelo
+    assert result.tool_llamada == "registrar_gasto"
+
+
+async def test_adjunto_no_descargado_se_describe_en_texto():
+    from app.domain.models import MediaItem
+
+    repo = FakeRepo()
+    llm = ScriptedLLM([_texto("No me llegó la imagen, ¿la reenvías? 🙏")])
+    user = repo.get_or_create_user("+50370000000", "Ana")
+    ctx = AgentContext(
+        user=user,
+        incoming=IncomingMessage(
+            canal="whatsapp",
+            telefono=user.telefono,
+            texto="mi recibo",
+            media=[MediaItem(content_type="image/jpeg", url="https://x", data_base64=None)],
+        ),
+        historial=[],
+    )
+    await _agente(llm, repo).handle(ctx)
+
+    contenido = llm.llamadas[0]["messages"][-1]["content"]
+    assert all(b["type"] == "text" for b in contenido)  # sin bloque image
+    assert "no se pudo descargar" in contenido[-1]["text"]
+    assert "mi recibo" in contenido[-1]["text"]

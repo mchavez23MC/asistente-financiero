@@ -154,6 +154,24 @@ class Repository(Protocol):
         revés); sin `tipo`, devuelve cualquiera pendiente (contexto del agente)."""
         ...
 
+    def list_transactions(
+        self,
+        user_id: UUID,
+        limite: int = 5,
+        tipo: Optional[str] = None,
+        categoria: Optional[str] = None,
+    ) -> list[Transaction]:
+        """Últimos movimientos confirmados del usuario, más recientes primero
+        (por fecha de registro). Alimenta consultar_movimientos, la detección de
+        duplicados y las correcciones ('borra el último gasto'). Excluye las
+        anuladas y las pendientes."""
+        ...
+
+    def get_transaction(self, user_id: UUID, transaction_id: UUID) -> Optional[Transaction]:
+        """Una transacción por id, SIEMPRE filtrada por user_id (§7.3.2): un id
+        de otro usuario devuelve None, nunca la fila ajena."""
+        ...
+
     # --- categorías (catálogo de T2) ---
     def ensure_category(self, nombre: str) -> None:
         """Registra la categoría en el catálogo si no existe (idempotente)."""
