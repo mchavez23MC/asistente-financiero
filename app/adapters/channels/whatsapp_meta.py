@@ -14,11 +14,15 @@ Notas de Meta:
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from app.domain.models import IncomingMessage, User
 
 GRAPH_API_BASE = "https://graph.facebook.com"
+
+log = logging.getLogger("e5.whatsapp")
 
 
 class WhatsAppMetaAdapter:
@@ -77,7 +81,20 @@ class WhatsAppMetaAdapter:
                     "text": {"body": text},
                 },
             )
-            resp.raise_for_status()
+        if resp.is_error:
+            # El cuerpo de Meta trae el código y el motivo exacto del fallo
+            # (ej. 131030 destinatario no permitido, 131047 ventana de 24h).
+            log.error(
+                "Meta Graph API devolvió %s al enviar a %s: %s",
+                resp.status_code,
+                to,
+                resp.text,
+            )
+            raise httpx.HTTPStatusError(
+                f"Meta Graph API {resp.status_code}: {resp.text}",
+                request=resp.request,
+                response=resp,
+            )
 
     @staticmethod
     def _primer_value(payload: dict) -> dict:
