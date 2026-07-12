@@ -88,6 +88,16 @@ def test_denylist_no_atrapa_mensajes_normales():
     assert match_denylist("cuánto llevo este mes") is None
 
 
+def test_denylist_no_atrapa_reembolso_ingreso():
+    """'Reembolso' es una categoría de ingreso: no debe escalar por keyword
+    (regresión del feature de ingresos). El reclamo lo detecta el clasificador."""
+    assert match_denylist("recibí un reembolso de 35 del seguro") is None
+    assert match_denylist("me pagaron el sueldo, 450") is None
+    assert match_denylist("vendí la bici en 120") is None
+    # La frase inequívoca de reclamo sí sigue escalando.
+    assert match_denylist("exijo la devolución del dinero") == "reclamo"
+
+
 async def test_denylist_corta_sin_llamar_al_clasificador():
     classifier = FakeClassifier(_ok())
     g = LayeredGuardrail(classifier)

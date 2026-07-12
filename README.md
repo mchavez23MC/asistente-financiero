@@ -1,10 +1,10 @@
 # E5 — Asistente financiero conversacional (Luca)
 
 **Luca** es un asistente financiero personal ecuatoriano que opera sobre
-WhatsApp. Registra y categoriza gastos (H1), da insights de presupuesto con
-alertas proactivas (H2) y responde soporte con base en una KB aprobada (H3),
-escalando a un humano todo lo sensible (reclamos, temas regulatorios, asesoría
-de inversión).
+WhatsApp. Registra y categoriza **gastos e ingresos** (H1) —incluido un ingreso
+base recurrente como el sueldo—, da insights de presupuesto y balance con alertas
+proactivas (H2) y responde soporte con base en una KB aprobada (H3), escalando a
+un humano todo lo sensible (reclamos, temas regulatorios, asesoría de inversión).
 
 Arquitectura **hexagonal** (puertos y adaptadores): `domain/` no importa de
 nadie; los adaptadores concretos se cablean solo en el composition root
@@ -15,10 +15,11 @@ las reglas del agente/guardrail en
 
 ## Estado: Fases 1–9 implementadas ✅
 
-El pipeline completo está en verde: **63/63 tests pasan** (`pytest -q`). No es
-un scaffold — el webhook de WhatsApp, el guardrail, el agente Claude, el RAG de
-soporte, el panel humano, el scheduler y el chat web plan B están cableados y
-probados con fakes/LLMs scripteados (sin llamar a APIs reales en los tests).
+El pipeline completo está en verde: **85/85 tests pasan** (`pytest -q`). No es
+un scaffold — el webhook de WhatsApp, el guardrail, el agente Claude (gastos e
+ingresos), el RAG de soporte, el panel humano, el scheduler y el chat web plan B
+(con streaming SSE) están cableados y probados con fakes/LLMs scripteados (sin
+llamar a APIs reales en los tests).
 
 | Fase | Qué hace | Dónde |
 |---|---|---|
@@ -31,6 +32,8 @@ probados con fakes/LLMs scripteados (sin llamar a APIs reales en los tests).
 | 7 | Scheduler de alertas proactivas de presupuesto | `app/infra/scheduler.py` |
 | 8 | Calibración del guardrail (recall 'sensible' 100% @ umbral 0.7) | `scripts/eval_guardrail.py` |
 | 9 | Chat web (plan B, sin WhatsApp) + hosting local + túnel | `app/interfaces/api/web_chat.py`, `scripts/run_local.sh` |
+| + | **Ingresos** (H1 extendido): registro puntual y recurrente, balance | `app/application/agents/ingreso.py`, `plan-implementacion-ingresos.md` |
+| + | Latencia y streaming (prompt caching, paralelización, SSE) | `plan-mejora-latencia.md` |
 
 ## Cómo funciona un mensaje
 
@@ -55,8 +58,13 @@ responder el `200 OK` del webhook rápido y hacer el trabajo del LLM en backgrou
 
 ### Tools del agente (contrato congelado, `app/domain/tools.py`)
 
-- `registrar_gasto` — crea la transacción (nace `pendiente_confirmacion`).
-- `consultar_presupuesto` — **el sistema calcula los números**; Luca solo los explica.
+- `registrar_gasto` — crea la transacción de gasto (nace `pendiente_confirmacion`).
+- `registrar_ingreso` — registra plata que **entra** (sueldo, freelance, venta…),
+  mismo loop de confirmación; `tipo='ingreso'` la separa de los gastos.
+- `configurar_ingreso_recurrente` — configura un ingreso fijo mensual (sueldo base);
+  no registra, solo agenda el recordatorio mensual que el usuario confirma por chat.
+- `consultar_presupuesto` — **el sistema calcula los números**; Luca solo los explica
+  (gastado, ingresos y balance del periodo).
 - `responder_soporte` — RAG con grounding sobre `app/kb/`; si no está en el corpus,
   no inventa: señala para escalar.
 - `crear_ticket` — escalación a humano.
@@ -77,8 +85,9 @@ responder el `200 OK` del webhook rápido y hacer el trabajo del LLM en backgrou
   estado, responder al usuario y vista de audit trail.
 - **Legales** — `/privacidad` y `/terminos`.
 - **Salud** — `/health`.
-- **Scheduler proactivo** — APScheduler in-process; revisa presupuestos cada
-  `SCHEDULER_INTERVALO_MIN` y notifica cruces de umbral (idempotente vía tabla `alerts`).
+- **Scheduler proactivo** — APScheduler in-process; cada `SCHEDULER_INTERVALO_MIN`
+  revisa presupuestos (alerta cruces de umbral, idempotente vía `alerts`) y recuerda
+  los ingresos recurrentes del día (idempotente vía `income_reminders`).
 
 ## Stack
 
@@ -87,7 +96,8 @@ Python ≥3.11 · FastAPI + Uvicorn · **Anthropic** (agentes, `claude-sonnet-5`
 APScheduler · Jinja2. Gestión de deps con **uv** (`uv.lock`).
 
 Tablas Supabase (`db/schema.sql`): `users`, `categories`, `messages`,
-`transactions`, `budgets`, `tickets`, `alerts`.
+`transactions` (gastos e ingresos, columna `tipo`), `budgets`, `tickets`,
+`alerts`, `recurring_incomes`, `income_reminders`.
 
 ## Puesta en marcha (local)
 
@@ -102,7 +112,7 @@ cp .env.example .env    # rellenar las claves reales (ver comentarios del archiv
 #    (pega db/schema.sql en el SQL editor de Supabase)
 
 # 4. Correr los tests
-uv run --extra dev python -m pytest -q     # 71 passed
+uv run --extra dev python -m pytest -q     # 85 passed
 
 # 5. Levantar la app
 uv run uvicorn app.main:app --reload --port 8080
@@ -171,8 +181,9 @@ uv run --extra dev python -m pytest -q
 | `test_walking_skeleton.py` | Pipeline del orquestador con fakes en memoria |
 | `test_guardrail.py` | Guardrail fail-closed en capas |
 | `test_agente.py` | Agente Claude con tools (LLM scripteado, H1+H2) |
+| `test_ingresos.py` | Ingresos: registro, recurrente, balance y el aislamiento `sum_gastos` |
 | `test_soporte_rag.py` | Grounding de H3 (dentro/fuera del corpus) |
-| `test_panel_y_webchat.py` | Panel humano y chat web plan B |
+| `test_panel_y_webchat.py` | Panel humano y chat web plan B (+ streaming SSE) |
 | `test_scheduler.py` | Alertas proactivas de presupuesto |
 
 ## Evaluación del guardrail
