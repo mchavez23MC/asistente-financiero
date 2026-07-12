@@ -88,23 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict:
         return {"ok": True}
 
-    from fastapi.responses import HTMLResponse
-
-    @app.get("/privacidad", response_class=HTMLResponse)
-    async def privacidad():
-        return """
-        <html>
-            <head><title>Política de Privacidad</title></head>
-            <body>
-                <h1>Política de Privacidad</h1>
-                <p>Esta aplicación es un prototipo de hackathon (E5). Los mensajes son procesados por modelos de lenguaje (Anthropic, Groq) para extraer intenciones financieras.</p>
-                <p>No compartimos datos con terceros comerciales ni almacenamos información personal más allá del alcance de la prueba.</p>
-            </body>
-        </html>
-        """
-
-
-
+    # Las páginas legales (/privacidad, /terminos) las sirve legal.router.
 
     # Puertos compartidos por las interfaces (panel, web chat).
     app.state.channel = channel

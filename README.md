@@ -1,58 +1,166 @@
-# E5 — Asistente financiero conversacional
+# E5 — Asistente financiero conversacional (Luca)
 
-Asistente sobre WhatsApp que registra gastos (H1), da insights de presupuesto
-(H2) y responde soporte (H3), escalando lo sensible a un humano. Arquitectura
-hexagonal (puertos y adaptadores). Ver `../E5-arquitectura.md` y
-`../E5-plan-implementacion.md`.
+**Luca** es un asistente financiero personal ecuatoriano que opera sobre
+WhatsApp. Registra y categoriza gastos (H1), da insights de presupuesto con
+alertas proactivas (H2) y responde soporte con base en una KB aprobada (H3),
+escalando a un humano todo lo sensible (reclamos, temas regulatorios, asesoría
+de inversión).
 
-## Estado: Fase 1 — Contratos congelados ✅
+Arquitectura **hexagonal** (puertos y adaptadores): `domain/` no importa de
+nadie; los adaptadores concretos se cablean solo en el composition root
+(`app/main.py`). Diseño completo en [`../E5-arquitectura.md`](../E5-arquitectura.md),
+plan por fases en [`../E5-plan-implementacion.md`](../E5-plan-implementacion.md) y
+las reglas del agente/guardrail en
+[`../comportamiento-blindaje-clasificador-y-agente-principal.md`](../comportamiento-blindaje-clasificador-y-agente-principal.md).
 
-Los 3 contratos de §8.2 están escritos y verificados (`domain/` no importa nada
-de `adapters/`; 10/10 checks de contrato en verde). A partir de aquí, ramas
-paralelas.
+## Estado: Fases 1–9 implementadas ✅
 
-| Contrato | Archivo | Congelado |
+El pipeline completo está en verde: **63/63 tests pasan** (`pytest -q`). No es
+un scaffold — el webhook de WhatsApp, el guardrail, el agente Claude, el RAG de
+soporte, el panel humano, el scheduler y el chat web plan B están cableados y
+probados con fakes/LLMs scripteados (sin llamar a APIs reales en los tests).
+
+| Fase | Qué hace | Dónde |
 |---|---|---|
-| Schema de datos (T2) | `app/domain/models.py` + `db/schema.sql` | ✅ |
-| Puertos del núcleo (5) | `app/domain/ports.py` | ✅ |
-| Tools del agente (T1) | `app/domain/tools.py` | ✅ |
+| 1 | Contratos congelados: modelos, 5 puertos, tools | `app/domain/` + `db/schema.sql` |
+| 2 | Walking skeleton: orquestador + webhook + Supabase | `app/application/process_message.py`, `interfaces/api/webhook.py`, `adapters/persistence/` |
+| 3 | Guardrail fail-closed en capas | `app/adapters/guardrail/` |
+| 4 | Agente principal Claude con tools (H1+H2) | `app/application/agents/principal.py` |
+| 5 | Soporte RAG con grounding (H3) | `app/application/agents/soporte_rag.py`, `app/kb/` |
+| 6 | Panel humano (cola de tickets, respuesta, audit) | `app/interfaces/api/panel.py` |
+| 7 | Scheduler de alertas proactivas de presupuesto | `app/infra/scheduler.py` |
+| 8 | Calibración del guardrail (recall 'sensible' 100% @ umbral 0.7) | `scripts/eval_guardrail.py` |
+| 9 | Chat web (plan B, sin WhatsApp) + hosting local + túnel | `app/interfaces/api/web_chat.py`, `scripts/run_local.sh` |
 
-Invariantes verificados:
-- `User.telefono` valida E.164; `Transaction` nace `pendiente_confirmacion`.
-- **Ninguna tool acepta `user_id` ni `telefono`** (§7.3.2) — lo resuelve el `Repository`.
-- Los 5 puertos existen como `Protocol` ligeros.
-- Regla de dependencia unidireccional respetada.
+## Cómo funciona un mensaje
 
-## Verificar los contratos
+El orquestador (`ProcessMessage`) parte el pipeline en dos etapas (§7.5), para
+responder el `200 OK` del webhook rápido y hacer el trabajo del LLM en background:
+
+1. **`preprocess`** (síncrono, antes del 200):
+   - **Consentimiento** — un usuario nuevo recibe solo el aviso legal (en la voz
+     de Luca) y se registra su consentimiento; nada más.
+   - **Guardrail** en capas, *fail-closed*: `denylist` determinística → clasificador
+     Groq → umbral de confianza. Si es sensible → se crea un `Ticket` con contexto
+     y se responde con una escalación cálida; **el mensaje nunca llega al agente**.
+     Si Groq falla/timeoutea (con reintentos + backoff), se falla cerrado.
+2. **`run_agent`** (background):
+   - El **agente principal Claude** (un solo agente, opción C) resuelve H1/H2 y
+     deriva H3 vía tools. Puede llamar varias tools en una pasada (p. ej. registrar
+     un gasto *y* consultar presupuesto). Actúa como **cuarta capa** de revisión de
+     sensibilidad.
+   - **Audit trail** completo en `messages` (§7.4): input → intención → tool →
+     respuesta. La entrega por el canal es resiliente (un 4xx/5xx de Meta no tira
+     el webhook ni genera duplicados).
+
+### Tools del agente (contrato congelado, `app/domain/tools.py`)
+
+- `registrar_gasto` — crea la transacción (nace `pendiente_confirmacion`).
+- `consultar_presupuesto` — **el sistema calcula los números**; Luca solo los explica.
+- `responder_soporte` — RAG con grounding sobre `app/kb/`; si no está en el corpus,
+  no inventa: señala para escalar.
+- `crear_ticket` — escalación a humano.
+
+> Invariante de aislamiento (§7.3.2): **ninguna tool recibe `user_id` ni `telefono`** —
+> el `user_id` se resuelve desde el contexto de la conversación, nunca desde el modelo.
+
+## Canales e interfaces
+
+- **WhatsApp Cloud API (Meta)** — `POST/GET /webhook/whatsapp` (verificación por
+  token + validación de firma `X-Hub-Signature-256`). Reemplazó a Twilio.
+- **Chat web (plan B)** — `GET /chat` + `POST /chat/send`, mismo núcleo, para
+  demostrar sin depender de WhatsApp.
+- **Panel humano** — `/panel` (auth básica): cola de tickets, detalle, cambiar
+  estado, responder al usuario y vista de audit trail.
+- **Legales** — `/privacidad` y `/terminos`.
+- **Salud** — `/health`.
+- **Scheduler proactivo** — APScheduler in-process; revisa presupuestos cada
+  `SCHEDULER_INTERVALO_MIN` y notifica cruces de umbral (idempotente vía tabla `alerts`).
+
+## Stack
+
+Python ≥3.11 · FastAPI + Uvicorn · **Anthropic** (agentes, `claude-sonnet-5`) ·
+**Groq** (guardrail, `openai/gpt-oss-20b`) · **Supabase** (única fuente de estado) ·
+APScheduler · Jinja2. Gestión de deps con **uv** (`uv.lock`).
+
+Tablas Supabase (`db/schema.sql`): `users`, `categories`, `messages`,
+`transactions`, `budgets`, `tickets`, `alerts`.
+
+## Puesta en marcha (local)
 
 ```bash
-# con las deps instaladas (pip install -e ".[dev]"):
-python3 -m pytest tests/test_contracts.py -q
+# 1. Instalar deps (uv)
+uv sync --extra dev
+
+# 2. Configurar entorno
+cp .env.example .env    # rellenar las claves reales (ver comentarios del archivo)
+
+# 3. Ejecutar el schema en tu proyecto Supabase
+#    (pega db/schema.sql en el SQL editor de Supabase)
+
+# 4. Correr los tests
+uv run --extra dev python -m pytest -q     # 63 passed
+
+# 5. Levantar la app
+uv run uvicorn app.main:app --reload --port 8080
 ```
 
-`tests/test_contracts.py` cubre modelos, puertos y el invariante de las tools.
+### Exponer WhatsApp con túnel público (hosting actual)
 
-## Mapa de implementación por fase
+El hosting se movió de Fly.io a **local + túnel** (`scripts/run_local.sh`):
+arranca uvicorn si hace falta y abre un túnel público (ngrok por defecto,
+`cloudflared` opcional). Con un dominio estático de ngrok la Callback URL de Meta
+no cambia entre demos.
 
-| Ruta | Fase | Estado |
-|---|---|---|
-| `app/domain/` | 1 | ✅ implementado |
-| `db/schema.sql` | 1 | ✅ ejecutar en Supabase |
-| `app/infra/config.py` | 0/1 | ✅ carga de entorno |
-| `app/application/process_message.py`, `router.py` | 2 | stub |
-| `app/adapters/persistence/supabase_repo.py` | 2 | stub |
-| `app/adapters/channels/whatsapp_twilio.py` | 2 | stub |
-| `app/interfaces/api/webhook.py` | 2 | stub |
-| `app/adapters/guardrail/groq_classifier.py`, `llm/groq.py` | 3 | stub |
-| `app/adapters/llm/claude.py`, `application/agents/{gasto,presupuesto}.py` | 4 | stub |
-| `app/application/agents/soporte_rag.py`, `app/kb/` | 5 | stub |
-| `app/interfaces/api/panel.py` | 6 | stub |
-| `app/infra/scheduler.py` | 7 | stub |
-| `app/adapters/channels/web_chat.py` | 9 | stub |
+```bash
+./scripts/run_local.sh                          # ngrok (usa NGROK_DOMAIN si está)
+TUNNEL=cloudflared ./scripts/run_local.sh       # sin cuenta
+```
 
-## Pendiente de Fase 0 (infra, aún no hecho)
+Luego pega en Meta → WhatsApp → Configuration la Callback URL
+`https://<URL>/webhook/whatsapp` y el `WHATSAPP_VERIFY_TOKEN` de tu `.env`.
 
-Este scaffold cubre los entregables de código de la Fase 1. Falta la infra de
-Fase 0 para cerrar su gate: crear el proyecto Supabase y ejecutar `db/schema.sql`,
-las 6 claves reales en `.env`, `Dockerfile` + `fly.toml`, endpoint `/health`,
-`fly secrets set`, pre-commit con `gitleaks` y la GitHub Action de deploy.
+> `Dockerfile` y `fly.toml` se conservan por si se vuelve a Fly.io, pero el flujo
+> por defecto es el túnel. CI (`.github/workflows/ci.yml`) corre los tests en cada
+> push a `main` / PR.
+
+## Configuración (`.env`)
+
+Todas las claves viven en `.env` (local, en `.gitignore`) o en el vault del host —
+nunca en la imagen ni en el repo. Variables clave (defaults y detalle en
+[`.env.example`](.env.example)):
+
+| Grupo | Variables |
+|---|---|
+| Anthropic | `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`, `CLAUDE_MAX_TOKENS` |
+| Groq (guardrail) | `GROQ_API_KEY`, `GROQ_MODEL` |
+| Supabase | `SUPABASE_URL`, `SUPABASE_KEY` |
+| WhatsApp/Meta | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `GRAPH_API_VERSION` |
+| Guardrail | `GUARDRAIL_UMBRAL_CONFIANZA` (0.7), `GUARDRAIL_TIMEOUT_MS`, `GUARDRAIL_REINTENTOS`, `GUARDRAIL_BACKOFF_MS` |
+| Panel | `PANEL_USER`, `PANEL_PASSWORD` |
+| Scheduler | `SCHEDULER_HABILITADO`, `SCHEDULER_INTERVALO_MIN` |
+
+## Tests
+
+```bash
+uv run --extra dev python -m pytest -q
+```
+
+| Archivo | Cubre |
+|---|---|
+| `test_contracts.py` | Contratos congelados (modelos, puertos, invariante de tools) |
+| `test_walking_skeleton.py` | Pipeline del orquestador con fakes en memoria |
+| `test_guardrail.py` | Guardrail fail-closed en capas |
+| `test_agente.py` | Agente Claude con tools (LLM scripteado, H1+H2) |
+| `test_soporte_rag.py` | Grounding de H3 (dentro/fuera del corpus) |
+| `test_panel_y_webchat.py` | Panel humano y chat web plan B |
+| `test_scheduler.py` | Alertas proactivas de presupuesto |
+
+## Evaluación del guardrail
+
+```bash
+uv run python scripts/eval_guardrail.py    # frases etiquetadas en scripts/frases_eval.py
+```
+
+Calibrado en fase 8: recall de la clase `sensible` al 100% con umbral 0.7 (se
+prioriza no dejar pasar nada sensible aunque cueste algún falso positivo).
