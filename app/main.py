@@ -27,7 +27,7 @@ from app.application.process_message import ProcessMessage
 from app.application.router import InMemoryAgentRegistry
 from app.infra.config import Settings
 from app.infra.scheduler import crear_scheduler
-from app.interfaces.api import panel, web_chat, webhook
+from app.interfaces.api import legal, panel, web_chat, webhook
 
 log = logging.getLogger("e5")
 
@@ -118,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(webhook.router)
     app.include_router(panel.router)
     app.include_router(web_chat.router)
+    app.include_router(legal.router)
     return app
 
 
