@@ -31,7 +31,7 @@ llamar a APIs reales en los tests).
 | 6 | Panel humano (cola de tickets, respuesta, audit) | `app/interfaces/api/panel.py` |
 | 7 | Scheduler de alertas proactivas de presupuesto | `app/infra/scheduler.py` |
 | 8 | Calibración del guardrail (recall 'sensible' 100% @ umbral 0.7) | `scripts/eval_guardrail.py` |
-| 9 | Chat web (plan B, sin WhatsApp) + hosting local + túnel | `app/interfaces/api/web_chat.py`, `scripts/run_local.sh` |
+| 9 | Chat web (plan B, sin WhatsApp) + hosting (Railway en prod, túnel en dev) | `app/interfaces/api/web_chat.py`, `scripts/run_local.sh` |
 | + | **Ingresos** (H1 extendido): registro puntual y recurrente, balance | `app/application/agents/ingreso.py`, `plan-implementacion-ingresos.md` |
 | + | Latencia y streaming (prompt caching, paralelización, SSE) | `plan-mejora-latencia.md` |
 
@@ -129,11 +129,12 @@ uv run --extra dev python -m pytest -q     # 85 passed
 uv run uvicorn app.main:app --reload --port 8080
 ```
 
-### Conectar WhatsApp (Twilio) con túnel público
+### Conectar WhatsApp (Twilio) — desarrollo local con túnel
 
-El hosting es **local + túnel** (`scripts/run_local.sh`): arranca uvicorn si hace
-falta y abre un túnel público (ngrok por defecto, `cloudflared` opcional). Con un
-dominio estático de ngrok la Callback URL de Twilio no cambia entre demos.
+Para **desarrollo** (producción es Railway, ver abajo) se usa **local + túnel**
+(`scripts/run_local.sh`): arranca uvicorn si hace falta y abre un túnel público
+(ngrok por defecto, `cloudflared` opcional). Con un dominio estático de ngrok la
+Callback URL de Twilio no cambia entre demos.
 
 ```bash
 ./scripts/run_local.sh                          # ngrok (usa NGROK_DOMAIN si está)
@@ -154,14 +155,33 @@ Configuración en Twilio (una vez):
 
 Ya puedes escribirle al número del sandbox desde WhatsApp y Luca responde.
 
+### Despliegue en producción (Railway)
+
+La app está desplegada y activa en Railway (build por `Dockerfile`):
+
+| Recurso | URL |
+|---|---|
+| Salud | `https://asistente-financiero-production-0bb3.up.railway.app/health` |
+| Chat web (plan B) | `https://asistente-financiero-production-0bb3.up.railway.app/chat` |
+| Webhook WhatsApp (Twilio) | `https://asistente-financiero-production-0bb3.up.railway.app/webhook/whatsapp` |
+| Panel humano | `https://asistente-financiero-production-0bb3.up.railway.app/panel` |
+| Legales | `…/privacidad` · `…/terminos` |
+
+Para conectar Twilio contra producción, pega en **"When a message comes in"** la
+URL del webhook de arriba (método **POST**), pon `TWILIO_VALIDATE_SIGNATURE=true` y
+`PUBLIC_BASE_URL=https://asistente-financiero-production-0bb3.up.railway.app` en las
+variables del servicio en Railway. Recuerda definir ahí también el resto de claves
+requeridas (`ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, …);
+si falta alguna, el deploy aborta al arrancar.
+
 > **Volver a Meta:** el adaptador y el webhook de Meta siguen en el repo como
 > ejemplo. Para reactivarlo, en `app/main.py` importa `WhatsAppMetaAdapter` y el
 > router `webhook` en vez de sus equivalentes `*_twilio`, y define las variables
 > `WHATSAPP_*` del `.env`.
 >
-> `Dockerfile` y `fly.toml` se conservan por si se vuelve a Fly.io, pero el flujo
-> por defecto es el túnel. CI (`.github/workflows/ci.yml`) corre los tests en cada
-> push a `main` / PR.
+> Producción corre en Railway con el `Dockerfile`; `fly.toml` se conserva por si
+> se vuelve a Fly.io. El túnel local es solo para desarrollo. CI
+> (`.github/workflows/ci.yml`) corre los tests en cada push a `main` / PR.
 
 ## Configuración (`.env`)
 
