@@ -18,7 +18,7 @@ from uuid import UUID
 
 from app.application.agents.gasto import registrar_gasto
 from app.application.agents.ingreso import configurar_ingreso_recurrente, registrar_ingreso
-from app.application.agents.presupuesto import consultar_presupuesto
+from app.application.agents.presupuesto import configurar_presupuesto, consultar_presupuesto
 from app.application.agents.soporte_rag import SoporteRAG
 from app.application.agents.transacciones import (
     consultar_movimientos,
@@ -73,6 +73,8 @@ conversación— con:
 - Corregir o anular una transacción ya registrada (tools:
   editar_transaccion, eliminar_transaccion)
 - Consultar su presupuesto, balance e insights (tool: consultar_presupuesto)
+- Crear o cambiar sus presupuestos por categoría ("ponme un límite de
+  100 en comida al mes") (tool: configurar_presupuesto)
 - Procesar imágenes y documentos que te envíe (recibos, facturas,
   capturas de transferencia, estados de cuenta) — ver la sección de
   IMÁGENES Y DOCUMENTOS
@@ -139,6 +141,20 @@ EXCEPCIÓN — no pidas confirmación y escala de una (la tool crea el ticket
 directo) cuando tu revisión final detecte algo sensible: un reclamo, un tema
 regulatorio, un pedido de asesoría de inversión o un fraude. Ahí la seguridad
 manda; solo avísale con calidez que un humano lo va a contactar.
+
+## PRESUPUESTOS (crear y modificar por chat)
+Si el usuario quiere ponerse un límite de gasto ("máximo 100 en comida
+al mes", "bájame el presupuesto de transporte a 40") usa
+configurar_presupuesto. Reglas:
+- Si no dio el monto o la categoría, pregunta — la tool devuelve los
+  `faltantes`, no inventes valores.
+- Sin periodo explícito asume mensual (es el caso normal) y dilo en tu
+  confirmación ("te dejé $100 mensuales en comida").
+- Si el retorno trae `anterior_monto_limite`, era una actualización:
+  menciona el cambio ("subí tu límite de comida de $80 a $100").
+- Al confirmar, recuérdale en una frase que le avisarás cuando se
+  acerque al límite. No confundas esta tool con registrar_gasto (un
+  gasto que ocurrió) ni con consultar_presupuesto (cómo va).
 
 ## POSIBLES DUPLICADOS
 Si registrar_gasto o registrar_ingreso devuelve "posible_duplicado"
@@ -287,6 +303,7 @@ _INTENCION_POR_TOOL = {
     "editar_transaccion": Intencion.GASTO,
     "eliminar_transaccion": Intencion.GASTO,
     "consultar_presupuesto": Intencion.PRESUPUESTO,
+    "configurar_presupuesto": Intencion.PRESUPUESTO,
     "responder_soporte": Intencion.SOPORTE,
 }
 
@@ -323,6 +340,7 @@ _ARGS_TOOL = {
     "editar_transaccion": {"transaction_id", "monto", "fecha", "categoria", "comercio", "tipo", "confirmado"},
     "eliminar_transaccion": {"transaction_id", "confirmado"},
     "consultar_presupuesto": {"periodo", "categoria"},
+    "configurar_presupuesto": {"categoria", "monto_limite", "periodo", "umbral_alerta"},
     "responder_soporte": {"pregunta"},
 }
 
@@ -523,6 +541,8 @@ class MainAgent:
             return eliminar_transaccion(self._repo, uid, **argumentos)
         if nombre == "consultar_presupuesto":
             return consultar_presupuesto(self._repo, uid, **argumentos)
+        if nombre == "configurar_presupuesto":
+            return configurar_presupuesto(self._repo, uid, **argumentos)
         if nombre == "responder_soporte":
             return await self._soporte.responder(argumentos.get("pregunta", ""))
         if nombre == "crear_ticket":
