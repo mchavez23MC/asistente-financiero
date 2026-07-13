@@ -84,6 +84,26 @@ def test_otp_se_envia_por_whatsapp_y_no_se_guarda_en_claro():
     assert codigo not in guardado.codigo_hash  # en reposo solo el hash
 
 
+def test_recordar_dispositivo_extiende_la_sesion_a_30_dias():
+    from datetime import datetime, timedelta, timezone
+
+    from app.application.auth import SESSION_TTL_DIAS, SESSION_TTL_RECORDAR_DIAS, _hash_token
+
+    app, repo, canal = _app()
+    client = TestClient(app)
+    client.post("/api/auth/solicitar", json={"telefono": TEL})
+    codigo = _codigo_enviado(canal)
+    r = client.post(
+        "/api/auth/verificar",
+        json={"telefono": TEL, "codigo": codigo, "recordar": True},
+    )
+    assert r.status_code == 200
+    session = repo.get_session(_hash_token(r.json()["token"]))
+    restante = session.expira_at - datetime.now(timezone.utc)
+    assert restante > timedelta(days=SESSION_TTL_DIAS)  # más que la sesión normal
+    assert timedelta(days=SESSION_TTL_RECORDAR_DIAS - 1) < restante <= timedelta(days=SESSION_TTL_RECORDAR_DIAS)
+
+
 # --- auth: políticas OWASP -------------------------------------------------------
 def test_codigo_incorrecto_da_401_y_consume_intento():
     app, repo, canal = _app()

@@ -45,6 +45,7 @@
                    maxlength="6" placeholder="••••••" style="letter-spacing:8px;text-align:center;font-size:22px">
             <div class="field__error" id="code-err"></div>
           </div>
+          <label class="check mb-16"><input type="checkbox" id="remember" checked><span>Confiar en este dispositivo por 30 días</span></label>
           <button class="btn btn--primary btn--block" type="submit">Entrar</button>
           <div class="row-between mt-12">
             <button class="btn btn--ghost btn--sm" type="button" id="btn-back">Cambiar número</button>
@@ -144,7 +145,7 @@
       clearErr('code', 'code-err');
       fetch('/api/auth/verificar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telefono: fullPhone, codigo: code })
+        body: JSON.stringify({ telefono: fullPhone, codigo: code, recordar: document.getElementById('remember').checked })
       }).then(function (r) {
         if (!r.ok) { err('code', 'code-err', 'Código incorrecto o expirado'); return null; }
         return r.json();
