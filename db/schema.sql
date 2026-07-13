@@ -117,3 +117,31 @@ create table if not exists alerts (
     created_at    timestamptz not null default now(),
     unique (budget_id, periodo_clave)
 );
+
+-- ---------------------------------------------------------------------
+-- auth_codes — OTP de acceso a la webapp, enviado por WhatsApp.
+-- Solo se guarda el HASH del código (OWASP): expira, un solo uso,
+-- máximo de intentos controlado por la aplicación.
+-- ---------------------------------------------------------------------
+create table if not exists auth_codes (
+    id          uuid primary key default gen_random_uuid(),
+    telefono    text not null,
+    codigo_hash text not null,
+    expira_at   timestamptz not null,
+    intentos    int not null default 0,
+    usado       boolean not null default false,
+    created_at  timestamptz not null default now()
+);
+create index if not exists idx_auth_codes_tel on auth_codes (telefono, created_at desc);
+
+-- ---------------------------------------------------------------------
+-- sessions — sesiones de la webapp emitidas al verificar el OTP.
+-- Se guarda el hash del token (nunca el token en claro).
+-- ---------------------------------------------------------------------
+create table if not exists sessions (
+    token_hash text primary key,
+    user_id    uuid not null references users(id) on delete cascade,
+    expira_at  timestamptz not null,
+    created_at timestamptz not null default now()
+);
+create index if not exists idx_sessions_user on sessions (user_id);

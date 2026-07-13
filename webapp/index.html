@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luca — Iniciar sesión</title>
-  <link rel="stylesheet" href="assets/css/tokens.css">
-  <link rel="stylesheet" href="assets/css/app.css">
+  <link rel="stylesheet" href="/assets/css/tokens.css">
+  <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body>
   <main class="auth">
@@ -16,9 +16,9 @@
       </div>
 
       <div class="card">
-        <h1 class="t-h2 mb-16">Inicia sesión</h1>
-
-        <form id="login-form" novalidate>
+        <!-- Paso 1: teléfono -->
+        <form id="step-phone" novalidate>
+          <h1 class="t-h2 mb-16">Inicia sesión</h1>
           <div class="field">
             <label class="field__label" for="phone">Teléfono (el mismo de tu WhatsApp)</label>
             <div class="input-group">
@@ -27,49 +27,145 @@
             </div>
             <div class="field__error" id="phone-err"></div>
           </div>
-
-          <button class="btn btn--primary btn--block" type="submit">Entrar</button>
-          <p class="muted t-micro mt-8">Tu identidad es tu número, igual que en WhatsApp.
-            Verás los mismos gastos y presupuestos que registras por el chat.</p>
-          <p class="muted t-micro mt-8">Al entrar aceptas los
-            <a href="legal.html">Términos y la Política de privacidad</a> (LOPDP Ecuador).</p>
+          <button class="btn btn--primary btn--block" type="submit" id="btn-enviar">Enviarme el código</button>
+          <p class="muted t-micro mt-8">Te llega un código de un solo uso por WhatsApp.
+            Solo quien tiene el teléfono en la mano puede entrar.</p>
+          <p class="muted t-micro mt-8">Al continuar aceptas los
+            <a href="/legal">Términos y la Política de privacidad</a> (LOPDP Ecuador).</p>
         </form>
-      </div>
 
-      <div class="banner banner--info mt-16 t-micro">
-        <strong>Versión de demostración:</strong> el acceso es solo con tu número, sin
-        verificación. En producción, Luca valida tu identidad con un código de un solo
-        uso (OTP) enviado a tu WhatsApp antes de mostrar ningún dato.
+        <!-- Paso 2: código OTP -->
+        <form id="step-code" class="hide" novalidate>
+          <h1 class="t-h2 mb-8">Revisa tu WhatsApp</h1>
+          <p class="muted t-label mb-16">Enviamos un código de 6 dígitos a <strong id="code-phone"></strong>.
+            Caduca en 5 minutos.</p>
+          <div class="field">
+            <label class="field__label" for="code">Código</label>
+            <input class="input input-amount" id="code" inputmode="numeric" autocomplete="one-time-code"
+                   maxlength="6" placeholder="••••••" style="letter-spacing:8px;text-align:center;font-size:22px">
+            <div class="field__error" id="code-err"></div>
+          </div>
+          <button class="btn btn--primary btn--block" type="submit">Entrar</button>
+          <div class="row-between mt-12">
+            <button class="btn btn--ghost btn--sm" type="button" id="btn-back">Cambiar número</button>
+            <button class="btn btn--ghost btn--sm" type="button" id="btn-resend" disabled>Reenviar (60s)</button>
+          </div>
+        </form>
       </div>
     </div>
   </main>
 
-  <script src="assets/js/data.js"></script>
-  <script src="assets/js/api.js"></script>
-  <script src="assets/js/ui.js"></script>
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/ui.js"></script>
   <script>
     // Sesión activa → directo a la app.
-    if (LUCA.phone()) location.href = 'app/inicio.html';
+    if (LUCA.token()) location.href = '/app/inicio';
 
-    var form = document.getElementById('login-form');
-    form.addEventListener('submit', function (e) {
+    var fullPhone = '';
+    var stepPhone = document.getElementById('step-phone');
+    var stepCode = document.getElementById('step-code');
+
+    function err(fieldId, errId, msg) {
+      var f = document.getElementById(fieldId);
+      f.closest('.field').classList.add('is-error'); f.classList.add('is-error');
+      document.getElementById(errId).innerHTML = LUCA.icon('alert') + msg;
+    }
+    function clearErr(fieldId, errId) {
+      var f = document.getElementById(fieldId);
+      f.closest('.field').classList.remove('is-error'); f.classList.remove('is-error');
+      document.getElementById(errId).innerHTML = '';
+    }
+
+    // --- reenvío con cuenta regresiva (cooldown del backend: 60s) ---
+    var resendTimer = null;
+    function startCooldown(s) {
+      var btn = document.getElementById('btn-resend');
+      btn.disabled = true;
+      var left = s;
+      clearInterval(resendTimer);
+      resendTimer = setInterval(function () {
+        left -= 1;
+        btn.textContent = 'Reenviar (' + left + 's)';
+        if (left <= 0) { clearInterval(resendTimer); btn.disabled = false; btn.textContent = 'Reenviar código'; }
+      }, 1000);
+      btn.textContent = 'Reenviar (' + left + 's)';
+    }
+
+    function solicitar(telefono) {
+      return fetch('/api/auth/solicitar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefono: telefono })
+      });
+    }
+
+    // --- Paso 1: pedir el código ---
+    stepPhone.addEventListener('submit', function (e) {
       e.preventDefault();
       var phone = document.getElementById('phone');
-      var pf = phone.closest('.field');
       var digits = phone.value.replace(/\D/g, '');
-      // Acepta '+593…' completo o el número local (se antepone +593).
       var full = phone.value.trim().startsWith('+') ? '+' + digits
                : '+593' + digits.replace(/^0/, '');
       if (!/^\+[1-9]\d{7,14}$/.test(full)) {
-        pf.classList.add('is-error');
-        document.getElementById('phone-err').innerHTML = LUCA.icon('alert') + 'Ingresa un número válido';
-        phone.classList.add('is-error');
-        return;
+        err('phone', 'phone-err', 'Ingresa un número válido'); return;
       }
-      pf.classList.remove('is-error'); phone.classList.remove('is-error');
-      LUCA.setPhone(full);
-      LUCA.toast('¡Hola! Entrando…');
-      setTimeout(function () { location.href = 'app/inicio.html'; }, 500);
+      clearErr('phone', 'phone-err');
+      fullPhone = full;
+      var btn = document.getElementById('btn-enviar');
+      btn.disabled = true; btn.textContent = 'Enviando…';
+      solicitar(full).then(function (r) {
+        btn.disabled = false; btn.textContent = 'Enviarme el código';
+        if (r.status === 429) {
+          return r.json().then(function (d) {
+            // Ya hay un código vigente: pasar al paso 2 respetando el cooldown.
+            document.getElementById('code-phone').textContent = fullPhone;
+            stepPhone.classList.add('hide'); stepCode.classList.remove('hide');
+            startCooldown(d.reintentar_en || 60);
+            document.getElementById('code').focus();
+          });
+        }
+        if (!r.ok) { err('phone', 'phone-err', 'No pudimos enviar el código. Intenta de nuevo.'); return; }
+        document.getElementById('code-phone').textContent = fullPhone;
+        stepPhone.classList.add('hide'); stepCode.classList.remove('hide');
+        startCooldown(60);
+        document.getElementById('code').focus();
+        LUCA.toast('Código enviado por WhatsApp 📲');
+      }).catch(function () {
+        btn.disabled = false; btn.textContent = 'Enviarme el código';
+        err('phone', 'phone-err', 'No hay conexión con el servidor.');
+      });
+    });
+
+    // --- Paso 2: verificar y canjear sesión ---
+    stepCode.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var code = document.getElementById('code').value.trim();
+      if (!/^\d{4,8}$/.test(code)) { err('code', 'code-err', 'Escribe el código de 6 dígitos'); return; }
+      clearErr('code', 'code-err');
+      fetch('/api/auth/verificar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefono: fullPhone, codigo: code })
+      }).then(function (r) {
+        if (!r.ok) { err('code', 'code-err', 'Código incorrecto o expirado'); return null; }
+        return r.json();
+      }).then(function (d) {
+        if (!d) return;
+        LUCA.setToken(d.token);
+        LUCA.setPhone(fullPhone);
+        LUCA.toast('¡Bienvenido! Entrando…');
+        setTimeout(function () { location.href = '/app/inicio'; }, 400);
+      }).catch(function () { err('code', 'code-err', 'No hay conexión con el servidor.'); });
+    });
+
+    document.getElementById('btn-back').addEventListener('click', function () {
+      stepCode.classList.add('hide'); stepPhone.classList.remove('hide');
+    });
+    document.getElementById('btn-resend').addEventListener('click', function () {
+      solicitar(fullPhone).then(function (r) {
+        if (r.status === 429) return r.json().then(function (d) { startCooldown(d.reintentar_en || 60); });
+        startCooldown(60);
+        if (r.ok) LUCA.toast('Código reenviado 📲');
+      });
     });
   </script>
 </body>

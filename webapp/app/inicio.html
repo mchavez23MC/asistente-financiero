@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luca — Inicio</title>
-  <link rel="stylesheet" href="../assets/css/tokens.css">
-  <link rel="stylesheet" href="../assets/css/app.css">
+  <link rel="stylesheet" href="/assets/css/tokens.css">
+  <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body>
   <div class="layout">
@@ -20,7 +20,7 @@
           <span id="ab-ico"></span>
           <div><strong>Ojo con Restaurantes:</strong> vas $199.00 de $200.00 este mes.</div>
           <div class="banner__actions">
-            <a class="btn btn--outline btn--sm" href="presupuestos.html">Ver</a>
+            <a class="btn btn--outline btn--sm" href="/app/presupuestos">Ver</a>
             <button class="iconbtn" id="ab-close" aria-label="Cerrar" style="width:30px;height:30px"></button>
           </div>
         </div>
@@ -64,7 +64,7 @@
 
             <!-- Últimos movimientos -->
             <div class="card">
-              <div class="card__head"><span class="card__title">Últimos movimientos</span><a class="card__link" href="movimientos.html">Ver todos</a></div>
+              <div class="card__head"><span class="card__title">Últimos movimientos</span><a class="card__link" href="/app/movimientos">Ver todos</a></div>
               <div id="recent-tx"></div>
             </div>
           </div>
@@ -80,13 +80,13 @@
 
             <!-- Presupuestos top -->
             <div class="card">
-              <div class="card__head"><span class="card__title">Presupuestos</span><a class="card__link" href="presupuestos.html">Ver todos</a></div>
+              <div class="card__head"><span class="card__title">Presupuestos</span><a class="card__link" href="/app/presupuestos">Ver todos</a></div>
               <div class="stack" id="budgets-mini" style="gap:14px"></div>
             </div>
 
             <!-- Insights recientes -->
             <div class="card">
-              <div class="card__head"><span class="card__title">Luca detectó</span><a class="card__link" href="insights.html">Ver todo</a></div>
+              <div class="card__head"><span class="card__title">Luca detectó</span><a class="card__link" href="/app/presupuestos">Ver todo</a></div>
               <div class="stack" id="insights-mini" style="gap:12px"></div>
             </div>
           </div>
@@ -96,11 +96,11 @@
   </div>
   <nav id="app-bottomnav"></nav>
 
-  <script src="../assets/js/data.js"></script>
-  <script src="../assets/js/api.js"></script>
-  <script src="../assets/js/ui.js"></script>
-  <script src="../assets/js/charts.js"></script>
-  <script src="../assets/js/shell.js"></script>
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/ui.js"></script>
+  <script src="/assets/js/charts.js"></script>
+  <script src="/assets/js/shell.js"></script>
   <script>
     LUCA.shell({ active: 'inicio', title: 'Inicio' });
     LUCA.ready(function () {
@@ -136,7 +136,7 @@
     var total = bd.reduce(function (a, c) { return a + c.value; }, 0);
     document.getElementById('donut-legend').innerHTML = LUCA.categoryBreakdown.map(function (c) {
       var cat = LUCA.cat(c.code);
-      return '<a class="legend__item" href="movimientos.html">' +
+      return '<a class="legend__item" href="/app/movimientos">' +
         '<span class="legend__dot" style="background:' + c.color + '"></span>' +
         '<span class="legend__name">' + cat.emoji + ' ' + cat.name + '</span>' +
         '<span class="legend__val luca-amount">' + LUCA.fmt(c.amount) + '</span>' +
@@ -147,7 +147,7 @@
     var top = LUCA.budgets.slice().sort(function (a, b) { return (b.spent / b.limit) - (a.spent / a.limit); }).slice(0, 3);
     if (!top.length) {
       document.getElementById('budgets-mini').innerHTML =
-        '<p class="muted t-label">Aún no tienes presupuestos. <a href="presupuestos.html">Crea el primero</a> y Luca te avisa antes de pasarte.</p>';
+        '<p class="muted t-label">Aún no tienes presupuestos. <a href="/app/presupuestos">Crea el primero</a> y Luca te avisa antes de pasarte.</p>';
     } else
     document.getElementById('budgets-mini').innerHTML = top.map(function (b) {
       var cat = LUCA.cat(b.code), pct = b.spent / b.limit, cls = pct >= 1 ? 'is-over' : pct >= b.threshold ? 'is-warn' : '';
@@ -164,7 +164,7 @@
     document.getElementById('insights-mini').innerHTML = LUCA.insights.slice(0, 3).map(function (i) {
       var ic = i.severity === 'alert' ? 'alert' : 'sparkles';
       var col = i.severity === 'alert' ? 'var(--luca-alert-text)' : 'var(--luca-navy)';
-      return '<a class="row gap-8" href="insights.html" style="text-decoration:none;color:inherit;align-items:flex-start">' +
+      return '<a class="row gap-8" href="/app/presupuestos" style="text-decoration:none;color:inherit;align-items:flex-start">' +
         '<span style="color:' + col + ';flex-shrink:0">' + LUCA.icon(ic) + '</span>' +
         '<span><span class="t-label">' + i.title + '</span><div class="muted t-micro">' + i.body + '</div></span></a>';
     }).join('');
@@ -178,7 +178,7 @@
         '<div class="tx-row__main"><div class="tx-row__title">' + (t.merchant || t.desc) + '</div>' +
         '<div class="tx-row__meta">' + cat.name + ' · ' + LUCA.relDate(t.date) + '</div></div>' +
         '<div class="tx-row__amt ' + amtCls + '">' + LUCA.signed(t.type, t.amount) + '</div></div>';
-    }).join('') || '<p class="muted t-label">Aún no hay movimientos. Cuéntale un gasto a Luca en el <a href="chat.html">chat</a>.</p>';
+    }).join('') || '<p class="muted t-label">Aún no hay movimientos. Cuéntale un gasto a Luca en el <a href="/app/chat">chat</a>.</p>';
     }); // LUCA.ready
   </script>
 </body>

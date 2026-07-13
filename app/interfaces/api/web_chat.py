@@ -61,8 +61,11 @@ async def pagina() -> HTMLResponse:
 @router.post("/chat/send")
 async def enviar(request: Request) -> JSONResponse:
     body = await request.json()
-    # Teléfono sintético estable por sesión de demo (identidad del web chat).
-    telefono = body.get("telefono") or "+50300000001"
+    # Identidad FIJA del plan B: un único usuario sintético de demo. No se
+    # acepta un teléfono del cliente — eso permitiría leer/escribir la
+    # conversación de otro número sin autenticarse (la webapp usa /api/chat
+    # con sesión OTP; este endpoint existe solo para demostrar sin WhatsApp).
+    telefono = "+50300000001"
     canal = WebChatCapturingChannel(telefono)
 
     pm = ProcessMessage(

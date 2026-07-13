@@ -29,7 +29,8 @@ from app.application.process_message import ProcessMessage
 from app.application.router import InMemoryAgentRegistry
 from app.infra.config import Settings
 from app.infra.scheduler import crear_scheduler
-from app.interfaces.api import legal, panel, web_chat, webapp_api, webhook_twilio
+from app.application.auth import AuthService
+from app.interfaces.api import legal, pages, panel, web_chat, webapp_api, webhook_twilio
 
 log = logging.getLogger("e5")
 
@@ -101,6 +102,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.guardrail = guardrail
     app.state.registry = registry
     app.state.process_message = process_message
+    # Auth de la webapp: OTP por WhatsApp (mismo canal Twilio) + sesiones.
+    app.state.auth = AuthService(repo, channel, demo_otp=settings.auth_demo_otp)
     app.state.panel_auth = (settings.panel_user, settings.panel_password)
     # Validación de firma del webhook de Twilio (X-Twilio-Signature).
     app.state.twilio_auth_token = settings.twilio_auth_token
@@ -112,12 +115,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(web_chat.router)
     app.include_router(legal.router)
     app.include_router(webapp_api.router)
-
-    # Webapp de Luca (frontend estático, rama webapp). Montada al final: las
-    # rutas de la API (webhook, panel, /chat, /api, legales) tienen precedencia.
-    webapp_dir = Path(__file__).resolve().parents[1] / "webapp"
-    if webapp_dir.exists():
-        app.mount("/", StaticFiles(directory=webapp_dir, html=True), name="webapp")
+    # Vistas de la webapp como endpoints con URL limpia (sin .html) — ver
+    # app/interfaces/api/pages.py. Solo los assets css/js van como estáticos.
+    app.include_router(pages.router)
+    assets_dir = Path(__file__).resolve().parents[1] / "webapp" / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
     return app
 
 

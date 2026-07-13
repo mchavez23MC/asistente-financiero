@@ -51,6 +51,8 @@ class Settings:
     panel_password: str
     scheduler_habilitado: bool
     scheduler_intervalo_min: int
+    # Código maestro de OTP para demos (vacío = apagado). NUNCA en producción.
+    auth_demo_otp: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -88,4 +90,5 @@ class Settings:
             scheduler_habilitado=os.environ.get("SCHEDULER_HABILITADO", "true").lower()
             in ("1", "true", "yes"),
             scheduler_intervalo_min=int(os.environ.get("SCHEDULER_INTERVALO_MIN", "30")),
+            auth_demo_otp=os.environ.get("AUTH_DEMO_OTP", ""),
         )

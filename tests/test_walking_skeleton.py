@@ -167,6 +167,40 @@ class FakeRepo:
     def marcar_alerta(self, user_id: UUID, budget_id: UUID, periodo_clave: str) -> None:
         self.alerts.add((budget_id, periodo_clave))
 
+    # --- autenticación de la webapp (OTP + sesiones) ---------------------------
+    def save_auth_code(self, code):
+        saved = code.model_copy(update={"id": code.id or uuid4()})
+        self.auth_codes = getattr(self, "auth_codes", [])
+        self.auth_codes.append(saved)
+        return saved
+
+    def get_auth_code_activo(self, telefono: str):
+        codes = [c for c in getattr(self, "auth_codes", []) if c.telefono == telefono and not c.usado]
+        return max(codes, key=lambda c: c.created_at) if codes else None
+
+    def incrementar_intentos_codigo(self, code_id: UUID) -> int:
+        for i, c in enumerate(self.auth_codes):
+            if c.id == code_id:
+                self.auth_codes[i] = c.model_copy(update={"intentos": c.intentos + 1})
+                return self.auth_codes[i].intentos
+        return 0
+
+    def marcar_codigo_usado(self, code_id: UUID) -> None:
+        for i, c in enumerate(self.auth_codes):
+            if c.id == code_id:
+                self.auth_codes[i] = c.model_copy(update={"usado": True})
+
+    def create_session(self, session):
+        self.sessions = getattr(self, "sessions", {})
+        self.sessions[session.token_hash] = session
+        return session
+
+    def get_session(self, token_hash: str):
+        return getattr(self, "sessions", {}).get(token_hash)
+
+    def delete_session(self, token_hash: str) -> None:
+        getattr(self, "sessions", {}).pop(token_hash, None)
+
 
 class FakeChannel:
     canal = "fake"

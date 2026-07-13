@@ -14,11 +14,35 @@ window.LUCA = window.LUCA || {};
 (function () {
   LUCA.phone = function () { return localStorage.getItem('luca_phone') || ''; };
   LUCA.setPhone = function (p) { localStorage.setItem('luca_phone', p); };
-  LUCA.logout = function () { localStorage.removeItem('luca_phone'); location.href = '/index.html'; };
+  LUCA.token = function () { return localStorage.getItem('luca_token') || ''; };
+  LUCA.setToken = function (t) { localStorage.setItem('luca_token', t); };
+  LUCA.logout = function () {
+    LUCA.api('/api/auth/salir', { method: 'POST' }).catch(function () {});
+    localStorage.removeItem('luca_token');
+    localStorage.removeItem('luca_phone');
+    location.href = '/';
+  };
+
+  // fetch con la sesión Bearer; un 401 manda de vuelta al login.
+  LUCA.api = function (path, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign(
+      { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + LUCA.token() },
+      opts.headers || {}
+    );
+    return fetch(path, opts).then(function (r) {
+      if (r.status === 401) {
+        localStorage.removeItem('luca_token');
+        location.href = '/';
+        throw new Error('sesión expirada');
+      }
+      return r;
+    });
+  };
 
   // Guardia de sesión para páginas de la app (llámalo antes de renderizar).
   LUCA.requirePhone = function () {
-    if (!LUCA.phone()) { location.href = '/index.html'; return false; }
+    if (!LUCA.token()) { location.href = '/'; return false; }
     return true;
   };
 
@@ -113,8 +137,7 @@ window.LUCA = window.LUCA || {};
   var _p = null;
   LUCA.loadReal = function () {
     if (_p) return _p;
-    var tel = LUCA.phone();
-    _p = fetch('/api/estado?telefono=' + encodeURIComponent(tel))
+    _p = LUCA.api('/api/estado')
       .then(function (r) { if (!r.ok) throw new Error('estado ' + r.status); return r.json(); })
       .then(function (d) {
         // Fecha LOCAL del navegador (no UTC): Ecuador es UTC-5 y toISOString
@@ -163,7 +186,7 @@ window.LUCA = window.LUCA || {};
                      evidence: 'Umbral configurado: ' + Math.round(b.threshold * 100) + '%.' };
           });
         LUCA.notifications = LUCA.insights.map(function (i, n) {
-          return { id: 'n_r' + n, unread: true, icon: 'alert', title: i.title, text: i.body, ago: 'ahora', href: 'presupuestos.html' };
+          return { id: 'n_r' + n, unread: true, icon: 'alert', title: i.title, text: i.body, ago: 'ahora', href: '/app/presupuestos' };
         });
 
         // El shell ya se pintó con el mock: parchear nombre/iniciales reales.
@@ -188,12 +211,11 @@ window.LUCA = window.LUCA || {};
     });
   };
 
-  // Chat real contra el pipeline (guardrail + agente Claude).
+  // Chat real contra el pipeline (guardrail + agente Claude). La identidad
+  // sale de la sesión Bearer — nunca del cliente.
   LUCA.sendChat = function (texto) {
-    return fetch('/api/chat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ telefono: LUCA.phone(), texto: texto })
-    }).then(function (r) { if (!r.ok) throw new Error('chat ' + r.status); return r.json(); })
+    return LUCA.api('/api/chat', { method: 'POST', body: JSON.stringify({ texto: texto }) })
+      .then(function (r) { if (!r.ok) throw new Error('chat ' + r.status); return r.json(); })
       .then(function (d) { _p = null; return d.respuestas || []; }); // invalida caché de estado
   };
 })();

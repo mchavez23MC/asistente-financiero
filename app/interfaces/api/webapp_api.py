@@ -1,18 +1,16 @@
-"""API JSON para la webapp de Luca (rama webapp) — centro de vista del usuario.
+"""API JSON de la webapp de Luca (rama webapp) — con autenticación OTP.
 
-Expone el MISMO núcleo que WhatsApp/chat web, pero como API para el frontend
-HTML de `webapp/`:
+Flujo de acceso (diseño en app/application/auth.py):
+  1. POST /api/auth/solicitar {telefono}         → envía OTP por WhatsApp (202)
+  2. POST /api/auth/verificar {telefono, codigo} → {token} de sesión (200)
+  3. Resto de endpoints: header `Authorization: Bearer <token>`; la identidad
+     sale SIEMPRE de la sesión — el cliente no puede pedir datos de otro número.
 
-  - POST /api/chat    → pipeline completo (consentimiento + guardrail + agente),
-                        idéntico a /chat/send pero con la identidad del cliente.
-  - GET  /api/estado  → snapshot del usuario: movimientos, presupuestos (con
-                        gastado calculado POR EL SISTEMA, §1.2), tickets y resumen.
-
-Identidad (demo): el teléfono E.164 que la webapp guarda en localStorage tras el
-"login". Sin contraseñas — la identidad natural del producto es el teléfono,
-igual que en WhatsApp (§3.1). En producción esto se reemplaza por sesión/OTP.
-El aislamiento por usuario se mantiene: todo se filtra por el user_id resuelto
-desde ese teléfono en el Repository (§7.3.2).
+Endpoints autenticados:
+  - POST /api/chat {texto}      → pipeline completo (guardrail + agente Claude)
+  - GET  /api/estado            → snapshot (números calculados por el sistema)
+  - POST /api/presupuestos      → crear/actualizar presupuesto (H2)
+  - POST /api/auth/salir        → revoca la sesión
 """
 
 from __future__ import annotations
@@ -23,8 +21,9 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.adapters.channels.web_chat import WebChatCapturingChannel
+from app.application.auth import CooldownActivo
 from app.application.process_message import ProcessMessage
-from app.domain.models import E164_PATTERN, Budget
+from app.domain.models import E164_PATTERN, Budget, User
 
 router = APIRouter(prefix="/api")
 
@@ -36,12 +35,59 @@ def _telefono_valido(telefono: str) -> str:
     return telefono
 
 
-@router.post("/chat")
-async def chat(request: Request) -> JSONResponse:
-    """Mismo pipeline que el chat web plan B (§9), con la identidad del cliente."""
+def _bearer(request: Request) -> str:
+    auth = request.headers.get("Authorization", "")
+    return auth[7:] if auth.startswith("Bearer ") else ""
+
+
+def _usuario_actual(request: Request) -> User:
+    """Resuelve la sesión → User. 401 si no hay sesión válida (fail-closed)."""
+    user = request.app.state.auth.usuario_de_token(_bearer(request))
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+    return user
+
+
+# ------------------------------------------------------------------ auth
+@router.post("/auth/solicitar")
+async def solicitar_codigo(request: Request) -> JSONResponse:
     body = await request.json()
     telefono = _telefono_valido(body.get("telefono", ""))
-    canal = WebChatCapturingChannel(telefono)
+    try:
+        await request.app.state.auth.solicitar_codigo(telefono)
+    except CooldownActivo as cd:
+        return JSONResponse(
+            {"detail": f"Espera {cd.segundos}s para pedir otro código", "reintentar_en": cd.segundos},
+            status_code=429,
+        )
+    # 202 siempre: no se revela si el número tiene cuenta.
+    return JSONResponse({"enviado": True, "canal": "whatsapp"}, status_code=202)
+
+
+@router.post("/auth/verificar")
+async def verificar_codigo(request: Request) -> JSONResponse:
+    body = await request.json()
+    telefono = _telefono_valido(body.get("telefono", ""))
+    token = await request.app.state.auth.verificar_codigo(telefono, str(body.get("codigo", "")))
+    if token is None:
+        raise HTTPException(status_code=401, detail="Código incorrecto o expirado")
+    return JSONResponse({"token": token})
+
+
+@router.post("/auth/salir")
+async def salir(request: Request) -> JSONResponse:
+    request.app.state.auth.cerrar_sesion(_bearer(request))
+    return JSONResponse({"ok": True})
+
+
+# ------------------------------------------------------------------ chat
+@router.post("/chat")
+async def chat(request: Request) -> JSONResponse:
+    """Mismo pipeline que WhatsApp (consentimiento → guardrail → agente),
+    con la identidad tomada de la sesión."""
+    user = _usuario_actual(request)
+    body = await request.json()
+    canal = WebChatCapturingChannel(user.telefono)
 
     pm = ProcessMessage(
         repo=request.app.state.repo,
@@ -49,44 +95,19 @@ async def chat(request: Request) -> JSONResponse:
         registry=request.app.state.registry,
         channel=canal,
     )
-    incoming = canal.parse({"texto": body.get("texto", ""), "telefono": telefono})
+    incoming = canal.parse({"texto": body.get("texto", "")})
     if incoming.texto:
         await pm(incoming)
     return JSONResponse({"respuestas": canal.enviados})
 
 
-@router.post("/presupuestos")
-async def crear_presupuesto(request: Request) -> JSONResponse:
-    """Crea/actualiza un presupuesto (H2: 'definir al menos un presupuesto
-    mensual por categoría' con 'umbral configurable'). Upsert por
-    (usuario, categoría, periodo)."""
-    body = await request.json()
-    telefono = _telefono_valido(body.get("telefono", ""))
-    repo = request.app.state.repo
-    user = repo.get_or_create_user(telefono)
-    try:
-        budget = Budget(
-            user_id=user.id,
-            categoria=str(body.get("categoria", "")).strip().lower(),
-            monto_limite=body.get("monto_limite"),
-            periodo=body.get("periodo", "mensual"),
-            umbral_alerta=float(body.get("umbral_alerta", 0.8)),
-        )
-    except Exception as exc:  # validación Pydantic → 422 legible
-        raise HTTPException(status_code=422, detail=str(exc))
-    if not budget.categoria:
-        raise HTTPException(status_code=422, detail="Falta la categoría")
-    guardado = repo.save_budget(budget)
-    return JSONResponse({"id": str(guardado.id), "categoria": guardado.categoria}, status_code=201)
-
-
+# ------------------------------------------------------------------ estado
 @router.get("/estado")
-async def estado(request: Request, telefono: str) -> JSONResponse:
-    """Snapshot para el panel del usuario. Los números los calcula el sistema
-    (sum_gastos en Postgres), nunca el modelo — coherente con H2 grounded."""
-    telefono = _telefono_valido(telefono)
+async def estado(request: Request) -> JSONResponse:
+    """Snapshot para el panel del usuario de la sesión. Los números los calcula
+    el sistema (sum_gastos en Postgres), nunca el modelo — H2 grounded."""
+    user = _usuario_actual(request)
     repo = request.app.state.repo
-    user = repo.get_or_create_user(telefono)
 
     transactions = repo.list_transactions(user.id, limit=100)
     budgets = []
@@ -139,3 +160,27 @@ async def estado(request: Request, telefono: str) -> JSONResponse:
             ],
         }
     )
+
+
+# --------------------------------------------------------------- presupuestos
+@router.post("/presupuestos")
+async def crear_presupuesto(request: Request) -> JSONResponse:
+    """Crea/actualiza un presupuesto (H2: umbral configurable). Upsert por
+    (usuario de la sesión, categoría, periodo)."""
+    user = _usuario_actual(request)
+    body = await request.json()
+    repo = request.app.state.repo
+    try:
+        budget = Budget(
+            user_id=user.id,
+            categoria=str(body.get("categoria", "")).strip().lower(),
+            monto_limite=body.get("monto_limite"),
+            periodo=body.get("periodo", "mensual"),
+            umbral_alerta=float(body.get("umbral_alerta", 0.8)),
+        )
+    except Exception as exc:  # validación Pydantic → 422 legible
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not budget.categoria:
+        raise HTTPException(status_code=422, detail="Falta la categoría")
+    guardado = repo.save_budget(budget)
+    return JSONResponse({"id": str(guardado.id), "categoria": guardado.categoria}, status_code=201)

@@ -24,12 +24,14 @@ from uuid import UUID
 from app.domain.models import (
     AgentContext,
     AgentResult,
+    AuthCode,
     Budget,
     Category,
     GuardrailResult,
     IncomingMessage,
     LLMResponse,
     Message,
+    Session,
     Ticket,
     Transaction,
     User,
@@ -205,4 +207,28 @@ class Repository(Protocol):
         ...
 
     def marcar_alerta(self, user_id: UUID, budget_id: UUID, periodo_clave: str) -> None:
+        ...
+
+    # --- autenticación de la webapp (OTP por WhatsApp + sesiones) -------------
+    def save_auth_code(self, code: AuthCode) -> AuthCode:
+        ...
+
+    def get_auth_code_activo(self, telefono: str) -> Optional[AuthCode]:
+        """Último código no usado del teléfono (para cooldown e intentos)."""
+        ...
+
+    def incrementar_intentos_codigo(self, code_id: UUID) -> int:
+        """Suma 1 a los intentos fallidos; devuelve el total."""
+        ...
+
+    def marcar_codigo_usado(self, code_id: UUID) -> None:
+        ...
+
+    def create_session(self, session: Session) -> Session:
+        ...
+
+    def get_session(self, token_hash: str) -> Optional[Session]:
+        ...
+
+    def delete_session(self, token_hash: str) -> None:
         ...

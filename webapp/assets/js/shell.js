@@ -5,13 +5,11 @@
 window.LUCA = window.LUCA || {};
 
 LUCA.nav = [
-  { id: 'inicio', href: 'inicio.html', label: 'Inicio', icon: 'home' },
-  { id: 'chat', href: 'chat.html', label: 'Chat con Luca', icon: 'chat' },
-  { id: 'movimientos', href: 'movimientos.html', label: 'Movimientos', icon: 'arrow-left-right' },
-  { id: 'presupuestos', href: 'presupuestos.html', label: 'Presupuestos', icon: 'target' },
-  { id: 'insights', href: 'insights.html', label: 'Insights y alertas', icon: 'sparkles' },
-  { id: 'recurrentes', href: 'recurrentes.html', label: 'Recurrentes', icon: 'repeat' },
-  { id: 'soporte', href: 'soporte.html', label: 'Soporte y ayuda', icon: 'headphones' }
+  { id: 'inicio', href: '/app/inicio', label: 'Inicio', icon: 'home' },
+  { id: 'chat', href: '/app/chat', label: 'Chat con Luca', icon: 'chat' },
+  { id: 'movimientos', href: '/app/movimientos', label: 'Movimientos', icon: 'arrow-left-right' },
+  { id: 'presupuestos', href: '/app/presupuestos', label: 'Presupuestos', icon: 'target' },
+  { id: 'soporte', href: '/app/tickets', label: 'Mis tickets', icon: 'headphones' }
 ];
 
 LUCA.shell = function (opts) {
@@ -32,8 +30,8 @@ LUCA.shell = function (opts) {
       '<div class="sidebar__brand"><div class="avatar avatar--gold">L</div><span class="wordmark">Luca</span></div>' +
       '<nav class="nav-list">' + items + '</nav>' +
       '<div class="sidebar__footer nav-list">' +
-        '<a class="nav-item ' + (active === 'cuenta' ? 'is-active' : '') + '" href="cuenta.html">' + LUCA.icon('settings') + '<span>Configuración</span></a>' +
-        '<a class="nav-item" href="cuenta.html">' + '<span class="avatar" style="width:20px;height:20px;font-size:11px">' + u.initials + '</span><span>' + u.name + '</span></a>' +
+        '<a class="nav-item" href="/legal">' + LUCA.icon('shield') + '<span>Privacidad y términos</span></a>' +
+        '<a class="nav-item" href="/app/inicio">' + '<span class="avatar" style="width:20px;height:20px;font-size:11px">' + u.initials + '</span><span>' + u.name + '</span></a>' +
         (LUCA.logout ? '<button class="nav-item" id="nav-logout" style="width:100%;background:none;border:0;cursor:pointer;text-align:left">' + LUCA.icon('x') + '<span>Salir</span></button>' : '') +
       '</div>';
     var lo = sb.querySelector('#nav-logout'); if (lo) lo.addEventListener('click', function () { LUCA.logout(); });
@@ -52,7 +50,7 @@ LUCA.shell = function (opts) {
       '<button class="iconbtn hide-mobile" id="btn-theme" aria-label="Cambiar tema">' + LUCA.icon('moon') + '</button>' +
       '<button class="iconbtn" id="btn-avatar" aria-label="Cuenta"><span class="avatar" style="width:30px;height:30px;font-size:12px">' + u.initials + '</span></button>';
     tb.querySelector('#btn-theme') && tb.querySelector('#btn-theme').addEventListener('click', LUCA.toggleTheme);
-    tb.querySelector('#btn-avatar').addEventListener('click', function () { location.href = 'cuenta.html'; });
+    tb.querySelector('#btn-avatar').addEventListener('click', function () { location.href = '/app/inicio'; });
     tb.querySelector('#btn-bell').addEventListener('click', LUCA.toggleNotif);
     var bm = tb.querySelector('#btn-menu'); if (bm) bm.addEventListener('click', LUCA.openMoreSheet);
   }
@@ -66,10 +64,10 @@ LUCA.shell = function (opts) {
         LUCA.icon(n.icon) + '<span>' + n.short + '</span>' + (n.badge ? '<span class="nav-item__badge">' + n.badge + '</span>' : '') + '</a>';
     }
     bn.innerHTML =
-      bitem({ id: 'inicio', href: 'inicio.html', icon: 'home', short: 'Inicio' }) +
-      bitem({ id: 'movimientos', href: 'movimientos.html', icon: 'arrow-left-right', short: 'Movim.' }) +
-      '<div class="bottomnav__fab"><a class="fab" href="chat.html" aria-label="Chat con Luca">' + LUCA.icon('chat') + '</a></div>' +
-      bitem({ id: 'presupuestos', href: 'presupuestos.html', icon: 'target', short: 'Presup.' }) +
+      bitem({ id: 'inicio', href: '/app/inicio', icon: 'home', short: 'Inicio' }) +
+      bitem({ id: 'movimientos', href: '/app/movimientos', icon: 'arrow-left-right', short: 'Movim.' }) +
+      '<div class="bottomnav__fab"><a class="fab" href="/app/chat" aria-label="Chat con Luca">' + LUCA.icon('chat') + '</a></div>' +
+      bitem({ id: 'presupuestos', href: '/app/presupuestos', icon: 'target', short: 'Presup.' }) +
       '<button class="bottomnav__item" id="bn-more">' + LUCA.icon('menu') + '<span>Más</span></button>';
     bn.querySelector('#bn-more').addEventListener('click', LUCA.openMoreSheet);
   }
@@ -78,17 +76,6 @@ LUCA.shell = function (opts) {
   LUCA.buildMoreSheet();
   LUCA.bindOverlays && LUCA.bindOverlays();
 
-  // Honestidad de demo: si la página no carga api.js (secciones aún no
-  // conectadas al backend), se marca visiblemente como vista de ejemplo.
-  if (!LUCA.loadReal) {
-    var pg = document.querySelector('main.page, main');
-    if (pg) {
-      var b = document.createElement('div');
-      b.className = 'banner banner--info mb-16 t-label';
-      b.textContent = 'Vista de demostración con datos de ejemplo — aún no conectada al backend.';
-      pg.insertBefore(b, pg.firstChild);
-    }
-  }
 };
 
 /* ---- Panel de notificaciones ---- */
@@ -122,11 +109,8 @@ LUCA.toggleNotif = function () { var o = document.getElementById('notif-overlay'
 LUCA.buildMoreSheet = function () {
   if (document.getElementById('more-overlay')) return;
   var extra = [
-    { href: 'insights.html', label: 'Insights y alertas', icon: 'sparkles' },
-    { href: 'recurrentes.html', label: 'Recurrentes', icon: 'repeat' },
-    { href: 'soporte.html', label: 'Soporte y ayuda', icon: 'headphones' },
-    { href: 'tickets.html', label: 'Mis tickets', icon: 'ticket' },
-    { href: 'cuenta.html', label: 'Configuración', icon: 'settings' }
+    { href: '/app/tickets', label: 'Mis tickets', icon: 'ticket' },
+    { href: '/legal', label: 'Privacidad y términos', icon: 'shield' }
   ].map(function (n) {
     return '<a class="lrow" href="' + n.href + '" style="text-decoration:none;color:inherit">' +
       '<div class="cat-chip cat-chip--sm">' + LUCA.icon(n.icon) + '</div><div class="lrow__main"><div class="lrow__title">' + n.label + '</div></div>' + LUCA.icon('chevron-right', 'muted') + '</a>';

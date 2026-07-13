@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luca — Movimientos</title>
-  <link rel="stylesheet" href="../assets/css/tokens.css">
-  <link rel="stylesheet" href="../assets/css/app.css">
+  <link rel="stylesheet" href="/assets/css/tokens.css">
+  <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body>
   <div class="layout">
@@ -16,10 +16,9 @@
         <div class="row-between mb-16 wrap gap-8">
           <div class="segmented" id="subtabs">
             <button class="is-on" data-tab="all">Todos</button>
-            <button data-tab="pending">Por confirmar (3)</button>
+            <button data-tab="pending">Por confirmar</button>
           </div>
           <div class="row gap-8">
-            <button class="btn btn--outline btn--sm" id="btn-import">Importar CSV</button>
             <button class="btn btn--primary btn--sm" id="btn-new">Nuevo</button>
           </div>
         </div>
@@ -78,12 +77,6 @@
       <button class="iconbtn" data-close="detail-drawer" id="dc1"></button>
     </div>
     <div class="drawer__body" id="detail-body"></div>
-    <div class="drawer__foot">
-      <button class="btn btn--outline" id="d-recat">Recategorizar</button>
-      <button class="btn btn--outline" id="d-edit">Editar</button>
-      <div class="spacer"></div>
-      <button class="btn btn--danger" id="d-delete"></button>
-    </div>
   </aside>
 
   <!-- Modal nuevo/editar -->
@@ -99,43 +92,26 @@
       </div>
       <div class="field"><label class="field__label">Categoría</label><select class="select" id="new-cat"></select></div>
       <div class="grid grid-2">
-        <div class="field"><label class="field__label">Fecha</label><input class="input" id="new-date" type="date" value="2026-07-11"></div>
+        <div class="field"><label class="field__label">Fecha</label><input class="input" id="new-date" type="date"></div>
         <div class="field"><label class="field__label">Método</label><select class="select" id="new-method"></select></div>
       </div>
       <div class="field"><label class="field__label">Comercio <span class="muted">(opcional)</span></label><input class="input" id="new-merchant" placeholder="Ej: Supermaxi"></div>
-      <div class="banner banner--info t-label"><span id="tip-ico"></span> Más rápido: escríbelo en el <a href="chat.html">chat</a>.</div>
+      <div class="banner banner--info t-label"><span id="tip-ico"></span> Más rápido: escríbelo en el <a href="/app/chat">chat</a>.</div>
       <div class="modal__actions"><button class="btn btn--ghost" data-close="new-overlay">Cancelar</button><button class="btn btn--primary" id="new-save">Guardar</button></div>
     </div>
   </div>
 
-  <!-- Modal recategorizar -->
-  <div class="overlay" id="cat-overlay">
-    <div class="modal" onclick="event.stopPropagation()">
-      <div class="row-between mb-16"><div class="modal__title" style="margin:0">Cambiar categoría</div><button class="iconbtn" data-close="cat-overlay" id="cc1"></button></div>
-      <div class="grid grid-3" id="cat-grid" style="gap:8px"></div>
-    </div>
-  </div>
-
-  <!-- Modal eliminar -->
-  <div class="overlay" id="del-overlay">
-    <div class="modal" onclick="event.stopPropagation()">
-      <div class="modal__title">¿Eliminar este movimiento?</div>
-      <div class="modal__text" id="del-text">Se quitará de tu resumen. Podrás deshacerlo.</div>
-      <div class="modal__actions"><button class="btn btn--ghost" data-close="del-overlay">Cancelar</button><button class="btn btn--danger" id="del-confirm">Eliminar</button></div>
-    </div>
-  </div>
-
-  <script src="../assets/js/data.js"></script>
-  <script src="../assets/js/api.js"></script>
-  <script src="../assets/js/ui.js"></script>
-  <script src="../assets/js/shell.js"></script>
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/ui.js"></script>
+  <script src="/assets/js/shell.js"></script>
   <script>
     LUCA.shell({ active: 'movimientos', title: 'Movimientos' });
     document.getElementById('search-ico').innerHTML = LUCA.icon('search');
     document.getElementById('tip-ico').innerHTML = LUCA.icon('sparkles');
-    ['dc1','nc1','cc1'].forEach(function(id){ document.getElementById(id).innerHTML = LUCA.icon('x'); });
-    document.getElementById('d-delete').innerHTML = LUCA.icon('trash') + 'Eliminar';
+    ['dc1','nc1'].forEach(function(id){ document.getElementById(id).innerHTML = LUCA.icon('x'); });
 
+    document.getElementById('new-date').value = new Date().toLocaleDateString('en-CA');
     LUCA.ready(function () {
     var confirmed = LUCA.transactions.filter(function (t) { return t.status === 'CONFIRMED'; });
     var pending = LUCA.transactions.filter(function (t) { return t.status === 'PENDING_CONFIRMATION'; });
@@ -254,9 +230,7 @@
         (t.needs && t.question ? '<div class="banner banner--alert mb-16 t-label"><span>' + LUCA.icon('info') + '</span>' + t.question + '</div>' +
           (t.amount === null ? '<div class="input-group mb-16"><span class="input-group__prefix">$</span><input class="input input-amount" id="p-amount" placeholder="0.00"></div>' : '') : '') +
         '<div class="row gap-8"><button class="btn btn--primary" id="p-confirm" style="flex:1">' + LUCA.icon('check') + 'Confirmar</button>' +
-        '<button class="btn btn--outline" id="p-recat">Categoría</button>' +
-        '<button class="iconbtn" id="p-del" style="width:44px;height:44px"></button></div></div>';
-      document.getElementById('p-del').innerHTML = LUCA.icon('trash');
+        '<button class="btn btn--outline" id="p-recat">Categoría</button></div></div>';
       // Confirmar: si falta el monto, se completa por el MISMO pipeline real
       // (loop de confirmación de H1: el agente cierra la transacción pendiente).
       document.getElementById('p-confirm').addEventListener('click', function () {
@@ -270,7 +244,6 @@
         }
         pIdx++; renderPending(); LUCA.toast('Confirmado'); updateBadge();
       });
-      document.getElementById('p-del').addEventListener('click', function () { pIdx++; renderPending(); LUCA.toast('Descartado'); updateBadge(); });
       document.getElementById('p-recat').addEventListener('click', function () { LUCA.toast('Dile la categoría a Luca en el chat 😉', { type: 'info' }); });
     }
     function updateBadge() {
