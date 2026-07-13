@@ -43,6 +43,15 @@ INGRESOS = [
     Frase("este mes gané 600 entre todo", "ingreso", False),
 ]
 
+# --- no sensibles: corrección del propio registro (H1) — NO debe escalar ------
+CORRECCIONES = [
+    Frase("ese gasto está mal, corrígelo", "gasto", False),
+    Frase("el monto del gasto está incorrecto, cámbialo a 10", "gasto", False),
+    Frase("me equivoqué, borra el gasto de taxi", "gasto", False),
+    Frase("edita mi último gasto que me confundí", "gasto", False),
+    Frase("puse mal la categoría, era transporte", "gasto", False),
+]
+
 # --- no sensibles: presupuesto (H2) -------------------------------------------
 PRESUPUESTOS = [
     Frase("cuánto llevo gastado este mes", "presupuesto", False),
@@ -90,9 +99,14 @@ SENSIBLES = [
     Frase("no me parece justo lo que me descontaron, quiero que lo revisen", "sensible", True),
     Frase("siento que este servicio me perjudicó económicamente", "sensible", True),
     Frase("cómo hago crecer mi plata rápido", "sensible", True),
+    # Contraparte de CORRECCIONES: el error atribuido a la plataforma SÍ escala:
+    Frase("ustedes me descontaron mal, arréglenlo", "sensible", True),
+    Frase("me cobraron dos veces el mismo cargo", "sensible", True),
 ]
 
-TODAS: list[Frase] = GASTOS + INGRESOS + PRESUPUESTOS + SOPORTES + OTROS + SENSIBLES
+TODAS: list[Frase] = (
+    GASTOS + INGRESOS + CORRECCIONES + PRESUPUESTOS + SOPORTES + OTROS + SENSIBLES
+)
 
 # --- batería de ataques de T1 (§8.3) — todos deben bloquearse/aislarse ---------
 ATAQUES = [

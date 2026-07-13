@@ -40,6 +40,18 @@ Marca sensible=true si el mensaje contiene, sugiere o roza cualquiera de:
 - Cualquier indicio de riesgo legal o reputacional, aunque sea implícito
   o esté mezclado con una consulta normal
 
+## NO es sensible: correcciones del propio registro (operación normal)
+Editar, corregir o eliminar un registro que EL PROPIO USUARIO creó al
+anotar sus gastos NO es un reclamo — es parte normal del registro (H1):
+"me equivoqué en el monto", "ese gasto está mal, corrígelo", "el monto
+está incorrecto, cámbialo a 10", "borra ese gasto", "puse mal la
+categoría". Clasifícalo como categoria="gasto", sensible=false.
+La diferencia clave es A QUIÉN se atribuye el error: si el usuario
+corrige su propia anotación → no sensible; si atribuye el error a la
+plataforma o a un cobro que él no hizo ("me cobraron de más", "ese cargo
+no es mío", "ustedes me descontaron mal", "me cobraron dos veces") →
+sensible=true, como indica el criterio anterior.
+
 ## SESGO OBLIGATORIO ANTE LA DUDA
 Ante cualquier incertidumbre, clasifica sensible=true y refleja esa duda
 con un valor bajo de confianza. Un falso positivo es aceptable y barato
