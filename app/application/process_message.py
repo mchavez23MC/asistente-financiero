@@ -15,6 +15,7 @@ Pipeline por mensaje entrante, partido en dos etapas (§7.5):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from typing import Optional
@@ -55,6 +56,12 @@ RESPUESTA_FAIL_CLOSED = (
     "Ya avisé al equipo; prueba de nuevo en unos minutos, ñaño."
 )
 
+# Aviso de espera cuando el agente tarda más del umbral (§7.5): que el usuario
+# sepa que su mensaje se está procesando y no quedó en el vacío. Es UX de
+# transporte, NO una respuesta sustantiva → no se audita ni entra al historial.
+AVISO_ESPERA = "Dame un segundito 🙌 ya te respondo…"
+AVISO_ESPERA_MEDIA = "Dame un momentito 👀 estoy revisando lo que me enviaste…"
+
 # categoria del guardrail → motivo del ticket (valores de MotivoEscalacion).
 _MOTIVOS_VALIDOS = {m.value for m in MotivoEscalacion}
 
@@ -85,12 +92,15 @@ class ProcessMessage:
         registry: AgentRegistry,
         channel: ChannelAdapter,
         historial_n: int = 10,
+        aviso_espera_umbral_s: float = 2.0,
     ) -> None:
         self._repo = repo
         self._guardrail = guardrail
         self._registry = registry
         self._channel = channel
         self._historial_n = historial_n
+        # Si el agente tarda más que esto, se manda un aviso de espera al usuario.
+        self._aviso_espera_umbral_s = aviso_espera_umbral_s
 
     async def __call__(self, incoming: IncomingMessage) -> None:
         """Pipeline completo en una llamada (tests, canales sin webhook)."""
@@ -161,10 +171,22 @@ class ProcessMessage:
     async def run_agent(self, context: AgentContext) -> None:
         """Solo el trabajo del LLM; corre en background tras el 200 (§7.5).
         Se envía primero y se audita después: el usuario ve la respuesta sin
-        esperar la escritura del audit trail (que igual queda garantizado)."""
+        esperar la escritura del audit trail (que igual queda garantizado).
+
+        Si el agente tarda más del umbral, una tarea vigía manda un aviso de
+        espera ('ya te respondo…') para que el usuario sepa que se está
+        procesando. Al terminar se cancela la vigía y se espera su cierre limpio
+        ANTES de enviar la respuesta real: así el aviso, si salió, siempre llega
+        antes que la respuesta (nunca después)."""
         t0 = time.perf_counter()
         handler = self._registry.get("principal")  # agente Claude (o 'eco' en tests)
-        result: AgentResult = await handler.handle(context)
+        vigia = asyncio.create_task(self._aviso_si_tarda(context))
+        try:
+            result: AgentResult = await handler.handle(context)
+        finally:
+            vigia.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await vigia
         await self._enviar_seguro(context.user, result.respuesta)
         await self._audit_respuesta(
             context.user.id, result.respuesta, result.intencion, result.tool_llamada
@@ -175,6 +197,15 @@ class ProcessMessage:
             result.tool_llamada,
             result.intencion,
         )
+
+    async def _aviso_si_tarda(self, context: AgentContext) -> None:
+        """Vigía: espera el umbral y, si no la cancelaron antes (el agente aún no
+        terminó), manda el aviso de espera. Cancelada = el agente respondió a
+        tiempo → no se manda nada. El aviso no se audita: es UX, no una respuesta."""
+        await asyncio.sleep(self._aviso_espera_umbral_s)
+        aviso = AVISO_ESPERA_MEDIA if context.incoming.media else AVISO_ESPERA
+        await self._enviar_seguro(context.user, aviso)
+        log.info("aviso de espera enviado a %s (agente > %ss)", context.user.id, self._aviso_espera_umbral_s)
 
     # ------------------------------------------------------------------ internos
     async def _escalar(

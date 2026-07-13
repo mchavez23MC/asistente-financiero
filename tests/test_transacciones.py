@@ -52,7 +52,7 @@ def test_consultar_movimientos_filtra_por_tipo_y_excluye_pendientes_y_anuladas()
 
     # Anulada deja de listarse.
     tid = r_gastos["movimientos"][0]["transaction_id"]
-    eliminar_transaccion(repo, u.id, transaction_id=tid)
+    eliminar_transaccion(repo, u.id, transaction_id=tid, confirmado=True)
     assert consultar_movimientos(repo, u.id, tipo="gasto")["cuantos"] == 0
 
 
@@ -62,7 +62,8 @@ def test_editar_transaccion_corrige_monto_y_categoria():
     u = _user(repo)
     r = registrar_gasto(repo, u.id, monto=32, categoria="comida")
     editado = editar_transaccion(
-        repo, u.id, transaction_id=r["transaction_id"], monto=20, categoria="transporte"
+        repo, u.id, transaction_id=r["transaction_id"], monto=20,
+        categoria="transporte", confirmado=True,
     )
 
     assert editado["monto"] == 20.0 and editado["categoria"] == "transporte"
@@ -98,15 +99,15 @@ def test_eliminar_transaccion_anula_y_deja_de_contar():
     repo = FakeRepo()
     u = _user(repo)
     r = registrar_gasto(repo, u.id, monto=32, categoria="comida")
-    borrado = eliminar_transaccion(repo, u.id, transaction_id=r["transaction_id"])
+    borrado = eliminar_transaccion(repo, u.id, transaction_id=r["transaction_id"], confirmado=True)
 
     assert borrado["status"] == "anulada"
     # No se borra la fila (audit), pero no suma en el presupuesto.
     assert len(repo.transactions) == 1
     assert repo.sum_gastos(u.id, categoria="comida") == Decimal("0")
-    # Segunda anulación avisa.
+    # Segunda anulación avisa (el error de estado gana sobre la confirmación).
     assert (
-        eliminar_transaccion(repo, u.id, transaction_id=r["transaction_id"])["error"]
+        eliminar_transaccion(repo, u.id, transaction_id=r["transaction_id"], confirmado=True)["error"]
         == "ya_anulada"
     )
 
@@ -117,6 +118,34 @@ def test_eliminar_transaccion_id_ajeno_devuelve_no_encontrada():
     otro = repo.get_or_create_user("+50370000001")
     r = registrar_ingreso(repo, otro.id, monto=100, categoria="Venta")
     assert eliminar_transaccion(repo, u.id, transaction_id=r["transaction_id"])["error"] == "no_encontrada"
+
+
+# --- confirmación antes de editar / eliminar (fase 11) ------------------------------
+def test_editar_sin_confirmar_pide_confirmacion_y_no_cambia_nada():
+    repo = FakeRepo()
+    u = _user(repo)
+    r = registrar_gasto(repo, u.id, monto=32, categoria="comida")
+    resp = editar_transaccion(
+        repo, u.id, transaction_id=r["transaction_id"], monto=20
+    )
+
+    assert resp["status"] == "requiere_confirmacion"
+    assert resp["actual"]["monto"] == 32.0
+    assert resp["propuesta"]["monto"] == 20.0
+    # Nada cambió: el gasto sigue en 32 hasta que el usuario confirme.
+    assert repo.sum_gastos(u.id, categoria="comida") == Decimal("32")
+
+
+def test_eliminar_sin_confirmar_pide_confirmacion_y_no_anula():
+    repo = FakeRepo()
+    u = _user(repo)
+    r = registrar_gasto(repo, u.id, monto=32, categoria="comida")
+    resp = eliminar_transaccion(repo, u.id, transaction_id=r["transaction_id"])
+
+    assert resp["status"] == "requiere_confirmacion"
+    assert resp["movimiento"]["monto"] == 32.0
+    # Sigue contando: no se anuló nada.
+    assert repo.sum_gastos(u.id, categoria="comida") == Decimal("32")
 
 
 # --- duplicados ---------------------------------------------------------------------

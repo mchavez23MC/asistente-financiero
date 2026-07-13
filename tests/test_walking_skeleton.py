@@ -7,6 +7,7 @@ eco → audit → send) y el webhook asíncrono, sin red ni Supabase. El gate re
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -17,12 +18,20 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.adapters.channels.whatsapp_meta import WhatsAppMetaAdapter
-from app.application.process_message import AVISO_LEGAL, ProcessMessage
+from app.application.process_message import (
+    AVISO_ESPERA,
+    AVISO_ESPERA_MEDIA,
+    AVISO_LEGAL,
+    ProcessMessage,
+)
 from app.application.router import EcoHandler, InMemoryAgentRegistry
 from app.domain.models import (
+    AgentResult,
     Budget,
     GuardrailResult,
     IncomingMessage,
+    Intencion,
+    MediaItem,
     Message,
     Ticket,
     Transaction,
@@ -284,6 +293,83 @@ async def test_historial_llega_al_handler():
 
     historial = repo.get_last_n_messages(next(iter(repo.users)), 10)
     assert len(historial) == 6  # 3 turnos × (user + assistant)
+
+
+# --- aviso de espera (agente lento) --------------------------------------------
+class HandlerLento:
+    """Handler con retardo configurable, para probar el aviso de espera."""
+
+    intent = "principal"
+
+    def __init__(self, delay_s: float) -> None:
+        self._delay_s = delay_s
+
+    async def handle(self, context) -> AgentResult:
+        await asyncio.sleep(self._delay_s)
+        return AgentResult(respuesta="listo, registrado ✅", intencion=Intencion.GASTO)
+
+
+def _pipeline_lento(delay_s: float, umbral_s: float):
+    repo, channel = FakeRepo(), FakeChannel()
+    registry = InMemoryAgentRegistry()
+    registry.register(HandlerLento(delay_s))
+    process = ProcessMessage(
+        repo, StubGuardrail(), registry, channel, aviso_espera_umbral_s=umbral_s
+    )
+    return process, repo, channel
+
+
+async def test_agente_lento_envia_aviso_de_espera_antes_de_responder():
+    process, _, channel = _pipeline_lento(delay_s=0.2, umbral_s=0.05)
+    await process(_msg("hola"))  # consentimiento; no llega al agente
+    channel.enviados.clear()
+
+    await process(_msg("gasté 25 en pupusas"))
+
+    # El aviso sale primero; la respuesta real, después. Nunca al revés.
+    textos = [t for _, t in channel.enviados]
+    assert textos == [AVISO_ESPERA, "listo, registrado ✅"]
+
+
+async def test_agente_rapido_no_envia_aviso_de_espera():
+    process, _, channel = _pipeline_lento(delay_s=0.0, umbral_s=0.05)
+    await process(_msg("hola"))
+    channel.enviados.clear()
+
+    await process(_msg("gasté 25 en pupusas"))
+
+    textos = [t for _, t in channel.enviados]
+    assert textos == ["listo, registrado ✅"]  # sin aviso: respondió a tiempo
+
+
+async def test_aviso_de_espera_con_media_menciona_el_adjunto():
+    process, _, channel = _pipeline_lento(delay_s=0.2, umbral_s=0.05)
+    await process(_msg("hola"))
+    channel.enviados.clear()
+
+    incoming = IncomingMessage(
+        canal="fake",
+        telefono="+50370000000",
+        texto="",
+        media=[MediaItem(content_type="image/jpeg", data_base64="Zg==")],
+    )
+    await process(incoming)
+
+    textos = [t for _, t in channel.enviados]
+    assert textos[0] == AVISO_ESPERA_MEDIA
+    assert textos[-1] == "listo, registrado ✅"
+
+
+async def test_aviso_de_espera_no_se_audita_ni_entra_al_historial():
+    process, repo, _ = _pipeline_lento(delay_s=0.2, umbral_s=0.05)
+    await process(_msg("hola"))
+    await process(_msg("gasté 25 en pupusas"))
+
+    # El audit trail solo tiene respuestas sustantivas: aviso legal + eco-real.
+    # El aviso de espera NO deja fila en `messages` (es UX de transporte).
+    asistentes = [m.contenido for m in repo.messages if m.rol == "assistant"]
+    assert AVISO_ESPERA not in asistentes
+    assert "listo, registrado ✅" in asistentes
 
 
 # --- adaptador Meta (WhatsApp Cloud API) -----------------------------------------

@@ -9,6 +9,11 @@ Renegociación (fase 10 — correcciones y media): se AÑADEN consultar_movimien
 editar_transaccion y eliminar_transaccion, y el parámetro `forzar` (detección de
 duplicados) a registrar_gasto/registrar_ingreso. Las firmas previas no cambian.
 
+Renegociación (fase 11 — confirmación explícita): se AÑADE el parámetro `confirmado`
+a editar_transaccion, eliminar_transaccion y crear_ticket. Sin `confirmado=true`
+estas tools NO ejecutan: devuelven 'requiere_confirmacion' para que el agente
+pregunte al usuario antes de corregir, anular o escalar.
+
 INVARIANTE DE SEGURIDAD (§7.3.2): el `user_id` NUNCA es parámetro de ninguna
 tool. Lo resuelve el `Repository` desde el teléfono del webhook. Aunque el
 modelo "quisiera" pedir datos de otro usuario, no tiene cómo expresarlo — el
@@ -19,6 +24,17 @@ Cada schema sigue el formato de tool de Anthropic:
 """
 
 from __future__ import annotations
+
+# Parámetro de confirmación compartido (fase 11): las acciones que corrigen,
+# anulan o escalan piden confirmación explícita del usuario antes de ejecutar.
+_CONFIRMADO_SCHEMA = {
+    "type": "boolean",
+    "description": (
+        "true SOLO después de que el usuario confirmó explícitamente esta acción "
+        "en su último mensaje. En la PRIMERA llamada NO lo pongas: la tool "
+        "devolverá 'requiere_confirmacion' y debes preguntarle antes de ejecutar."
+    ),
+}
 
 # --- H1: registrar un gasto -------------------------------------------------
 REGISTRAR_GASTO = {
@@ -294,6 +310,7 @@ EDITAR_TRANSACCION = {
                 "enum": ["gasto", "ingreso"],
                 "description": "Solo si el usuario aclara que era ingreso y no gasto (o al revés).",
             },
+            "confirmado": _CONFIRMADO_SCHEMA,
         },
         "required": ["transaction_id"],
     },
@@ -302,6 +319,8 @@ EDITAR_TRANSACCION = {
     #    "categoria": str|null, "comercio": str|null, "tipo": str,
     #    "total_categoria_periodo": number|null}
     #   o {"error": "no_encontrada"} si el id no existe para este usuario.
+    #   Sin confirmado=true: {"status": "requiere_confirmacion", "actual": {...},
+    #   "propuesta": {...}} SIN aplicar el cambio; pregunta y repite con confirmado=true.
 }
 
 # --- H1: eliminar (anular) una transacción -----------------------------------
@@ -321,12 +340,15 @@ ELIMINAR_TRANSACCION = {
                 "type": "string",
                 "description": "Id de la transacción a anular.",
             },
+            "confirmado": _CONFIRMADO_SCHEMA,
         },
         "required": ["transaction_id"],
     },
     # Retorno documentado:
     #   {"transaction_id": str, "status": "anulada", "monto": number|null,
     #    "categoria": str|null}  o  {"error": "no_encontrada"}.
+    #   Sin confirmado=true: {"status": "requiere_confirmacion", "movimiento": {...}}
+    #   SIN anular nada; confirma con el usuario y repite con confirmado=true.
 }
 
 # --- transversal: escalar a humano -----------------------------------------
@@ -362,11 +384,16 @@ CREAR_TICKET = {
                 "type": "string",
                 "description": "Resumen para el agente humano: qué pidió el usuario y por qué se escala.",
             },
+            "confirmado": _CONFIRMADO_SCHEMA,
         },
         "required": ["motivo", "contexto"],
     },
     # Retorno documentado:
     #   {"ticket_id": str, "estado": "abierto"}
+    #   Para motivos de "pedir ayuda" (fuera_de_corpus, otro), sin confirmado=true:
+    #   {"status": "requiere_confirmacion", ...} SIN crear el ticket; pregunta al
+    #   usuario si quiere que escales y repite con confirmado=true. Los motivos
+    #   sensibles (reclamo, regulatorio, consejo_inversion, fraude) escalan directo.
 }
 
 #: Set completo de tools del agente principal (H1 + H2 + H3 como opción C, §1).

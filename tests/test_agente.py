@@ -129,6 +129,51 @@ async def test_segundo_mensaje_completa_la_pendiente():
     assert repo.transactions[0].monto == Decimal("25")
 
 
+# --- confirmación antes de escalar (crear_ticket, fase 11) ------------------------
+async def test_crear_ticket_pide_confirmacion_antes_de_escalar():
+    repo = FakeRepo()
+    llm = ScriptedLLM(
+        [
+            _tool("crear_ticket", {"motivo": "otro", "contexto": "quiere hablar con alguien"}),
+            _texto("¿Quieres que te conecte con alguien de mi equipo?"),
+        ]
+    )
+    await _agente(llm, repo).handle(_contexto(repo, "necesito ayuda con algo"))
+
+    # No se creó el ticket: la tool pidió confirmación primero.
+    assert len(repo.tickets) == 0
+    tool_result = llm.llamadas[1]["messages"][-1]["content"][0]["content"]
+    assert "requiere_confirmacion" in tool_result
+
+
+async def test_crear_ticket_confirmado_escala():
+    repo = FakeRepo()
+    llm = ScriptedLLM(
+        [
+            _tool("crear_ticket", {"motivo": "otro", "contexto": "quiere un humano", "confirmado": True}),
+            _texto("Listo, te contactan."),
+        ]
+    )
+    await _agente(llm, repo).handle(_contexto(repo, "sí, conéctame"))
+
+    assert len(repo.tickets) == 1
+
+
+async def test_crear_ticket_motivo_sensible_escala_sin_confirmar():
+    """Seguridad primero: un fraude escala directo, sin pedirle permiso al usuario."""
+    repo = FakeRepo()
+    llm = ScriptedLLM(
+        [
+            _tool("crear_ticket", {"motivo": "fraude", "contexto": "cargo no reconocido"}),
+            _texto("Ya avisé a mi equipo, te contactan."),
+        ]
+    )
+    await _agente(llm, repo).handle(_contexto(repo, "hay un cargo que no hice"))
+
+    assert len(repo.tickets) == 1
+    assert next(iter(repo.tickets.values())).motivo == "fraude"
+
+
 # --- H2: consultar presupuesto (grounded) -----------------------------------------
 async def test_consulta_presupuesto_usa_numeros_del_sistema():
     repo = FakeRepo()

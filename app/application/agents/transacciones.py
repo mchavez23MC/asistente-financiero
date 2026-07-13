@@ -90,6 +90,7 @@ def editar_transaccion(
     categoria: Optional[str] = None,
     comercio: Optional[str] = None,
     tipo: Optional[str] = None,
+    confirmado: bool = False,
 ) -> dict:
     tid = _parse_id(transaction_id)
     existente = repo.get_transaction(user_id, tid) if tid else None
@@ -115,6 +116,18 @@ def editar_transaccion(
     if not cambios:
         return {"error": "sin_cambios", "transaction_id": str(existente.id)}
 
+    # Confirmación explícita (fase 11): sin confirmado no se aplica nada; se le
+    # muestra al agente el antes/después para que lo confirme con el usuario.
+    if not confirmado:
+        return {
+            "status": "requiere_confirmacion",
+            "accion": "editar",
+            "actual": _resumen(existente),
+            "propuesta": _resumen(existente.model_copy(update=cambios)),
+            "nota": "NO se aplicó ningún cambio. Confirma con el usuario qué vas a "
+            "corregir; si dice que sí, repite la tool con confirmado=true.",
+        }
+
     guardada = repo.save_transaction(existente.model_copy(update=cambios))
 
     # Total groundeado de la categoría tras la corrección (§1.2).
@@ -131,7 +144,9 @@ def editar_transaccion(
 
 
 # --- eliminar (anular) ----------------------------------------------------------
-def eliminar_transaccion(repo: Repository, user_id: UUID, transaction_id=None) -> dict:
+def eliminar_transaccion(
+    repo: Repository, user_id: UUID, transaction_id=None, confirmado: bool = False
+) -> dict:
     tid = _parse_id(transaction_id)
     existente = repo.get_transaction(user_id, tid) if tid else None
     if existente is None:
@@ -139,6 +154,17 @@ def eliminar_transaccion(repo: Repository, user_id: UUID, transaction_id=None) -
     status = existente.status if isinstance(existente.status, str) else existente.status.value
     if status == TransactionStatus.ANULADA.value:
         return {"error": "ya_anulada", "transaction_id": str(existente.id)}
+
+    # Confirmación explícita (fase 11): anular no se deshace solo, así que sin
+    # confirmado no se toca nada; se muestra el movimiento para confirmarlo.
+    if not confirmado:
+        return {
+            "status": "requiere_confirmacion",
+            "accion": "eliminar",
+            "movimiento": _resumen(existente),
+            "nota": "NO se anuló nada. Confirma con el usuario que este es el "
+            "movimiento a borrar; si dice que sí, repite con confirmado=true.",
+        }
 
     guardada = repo.save_transaction(
         existente.model_copy(update={"status": TransactionStatus.ANULADA})

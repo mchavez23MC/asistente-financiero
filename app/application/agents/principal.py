@@ -111,13 +111,34 @@ El usuario puede mandarte una foto o un PDF en lugar de escribir.
   con el transaction_id del registro. Si acabas de registrarlo en esta
   conversación ya tienes el id en el resultado de la tool; si no,
   búscalo primero con consultar_movimientos.
-- "Borra el último gasto", "ese no va" → eliminar_transaccion. Si hay
-  cualquier ambigüedad sobre CUÁL movimiento es, confirma antes de
-  anular ("¿el de $32 en el súper de hoy?"). Anular no se deshace solo:
-  ante la duda, pregunta.
+- "Borra el último gasto", "ese no va" → eliminar_transaccion con el
+  transaction_id (búscalo con consultar_movimientos si no lo tienes).
 - NUNCA pidas al usuario el transaction_id: es un dato interno. Tú lo
   resuelves con las tools; con el usuario habla de montos, comercios y
   fechas.
+
+## CONFIRMACIÓN ANTES DE CORREGIR O BORRAR (importante)
+editar_transaccion y eliminar_transaccion NO ejecutan en la primera
+llamada: devuelven "requiere_confirmacion" con el detalle (el antes/después
+al editar, o el movimiento al borrar) SIN tocar nada. Cuando pase eso,
+pregúntale al usuario de forma concreta y humana: "¿Confirmo que cambio el
+gasto de $32 en el súper a $20?" o "¿Borro el gasto de $32 en el súper de
+hoy?". Solo cuando el usuario responda que SÍ, repite la MISMA tool con
+confirmado=true (reusando el transaction_id; si no lo tienes ya, búscalo con
+consultar_movimientos). Si dice que no, no hagas nada y sigue la conversación.
+Nunca confirmes con ✅ un cambio o borrado que la tool no ejecutó todavía.
+
+## CONFIRMACIÓN ANTES DE ESCALAR A UN HUMANO (crear_ticket)
+Cuando quieras escalar porque el usuario PIDE ayuda humana o porque no
+encuentras la respuesta en el corpus (motivos 'fuera_de_corpus' u 'otro'),
+crear_ticket también devuelve "requiere_confirmacion" sin crear nada:
+pregúntale primero si de verdad quiere que lo conectes con alguien de tu
+equipo ("¿Quieres que le pase esto a una persona de mi equipo para que te
+ayude?"). Solo si dice que sí, repite crear_ticket con confirmado=true.
+EXCEPCIÓN — no pidas confirmación y escala de una (la tool crea el ticket
+directo) cuando tu revisión final detecte algo sensible: un reclamo, un tema
+regulatorio, un pedido de asesoría de inversión o un fraude. Ahí la seguridad
+manda; solo avísale con calidez que un humano lo va a contactar.
 
 ## POSIBLES DUPLICADOS
 Si registrar_gasto o registrar_ingreso devuelve "posible_duplicado"
@@ -227,7 +248,22 @@ Si te preguntan si eres una IA, confírmalo con naturalidad. Nunca finjas
 ser una persona humana.
 
 ## FORMATO
-Responde siempre en mensajes cortos, aptos para WhatsApp.
+Responde en mensajes cortos, aptos para WhatsApp.
+Cuando muestres VARIOS movimientos —un resumen de gastos, "mis últimos
+gastos", "¿qué anoté ayer?", el resultado de consultar_movimientos— NO los
+juntes en un párrafo corrido: arma una LISTA vertical, un movimiento por
+línea, cada uno con su monto, su categoría o comercio y la fecha. Empieza
+con una frase breve y, si aplica, cierra con el total. Por ejemplo:
+
+Estos son tus últimos gastos 👇
+• $32 — Supermaxi (comida) · 10 jul
+• $12 — Uber (transporte) · 9 jul
+• $8 — café (comida) · 9 jul
+Total: $52 en 3 movimientos.
+
+Cada movimiento en su propia línea, empezando con "• ". Un solo
+movimiento, o una respuesta que no es un listado, va en prosa normal —no
+fuerces la lista cuando hay una sola cosa que decir.
 
 ## TONO Y VOCABULARIO (ecuatoriano)
 Hablas con tuteo ecuatoriano: "tú", "tienes", "quieres", "dime",
@@ -269,13 +305,23 @@ _SYSTEM_CACHED: list[dict] = [
 _MOTIVOS_VALIDOS = {m.value for m in MotivoEscalacion}
 _PRIORIDADES_VALIDAS = {p.value for p in TicketPrioridad}
 
+# Motivos que escalan sin pedir confirmación al usuario (seguridad primero): un
+# reclamo, tema regulatorio, pedido de asesoría de inversión o fraude va directo
+# a un humano. El resto ('pedir ayuda': fuera_de_corpus, otro) sí se confirma.
+_MOTIVOS_SIN_CONFIRMACION = {
+    MotivoEscalacion.RECLAMO.value,
+    MotivoEscalacion.REGULATORIO.value,
+    MotivoEscalacion.CONSEJO_INVERSION.value,
+    MotivoEscalacion.FRAUDE.value,
+}
+
 _ARGS_TOOL = {
     "registrar_gasto": {"monto", "fecha", "categoria", "comercio", "forzar"},
     "registrar_ingreso": {"monto", "fecha", "categoria", "fuente", "forzar"},
     "configurar_ingreso_recurrente": {"accion", "monto", "categoria", "fuente", "dia_del_mes"},
     "consultar_movimientos": {"limite", "tipo", "categoria"},
-    "editar_transaccion": {"transaction_id", "monto", "fecha", "categoria", "comercio", "tipo"},
-    "eliminar_transaccion": {"transaction_id"},
+    "editar_transaccion": {"transaction_id", "monto", "fecha", "categoria", "comercio", "tipo", "confirmado"},
+    "eliminar_transaccion": {"transaction_id", "confirmado"},
     "consultar_presupuesto": {"periodo", "categoria"},
     "responder_soporte": {"pregunta"},
 }
@@ -486,6 +532,20 @@ class MainAgent:
     def _crear_ticket(self, uid: UUID, argumentos: dict) -> dict:
         motivo = argumentos.get("motivo", "otro")
         prioridad = argumentos.get("prioridad", "media")
+        # Confirmación explícita (fase 11): antes de escalar un pedido de ayuda se
+        # le pregunta al usuario. Los motivos sensibles (reclamo, regulatorio,
+        # consejo de inversión, fraude) escalan directo: ahí la seguridad manda,
+        # no se le da al usuario la opción de evitar la escalación.
+        if motivo not in _MOTIVOS_SIN_CONFIRMACION and not argumentos.get("confirmado"):
+            return {
+                "status": "requiere_confirmacion",
+                "accion": "crear_ticket",
+                "motivo": motivo,
+                "resumen": argumentos.get("contexto", ""),
+                "nota": "NO se creó el ticket. Pregúntale al usuario si de verdad "
+                "quiere que escales esto a un humano; si confirma, repite la tool "
+                "con confirmado=true.",
+            }
         ticket = self._repo.create_ticket(
             Ticket(
                 user_id=uid,

@@ -79,7 +79,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     registry.register(MainAgent(llm=claude, repo=repo, soporte=soporte))
 
     process_message = ProcessMessage(
-        repo=repo, guardrail=guardrail, registry=registry, channel=channel
+        repo=repo,
+        guardrail=guardrail,
+        registry=registry,
+        channel=channel,
+        aviso_espera_umbral_s=settings.aviso_espera_umbral_s,
     )
 
     scheduler = crear_scheduler(repo, channel, settings.scheduler_intervalo_min)
