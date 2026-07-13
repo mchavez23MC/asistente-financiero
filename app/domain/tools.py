@@ -14,6 +14,10 @@ a editar_transaccion, eliminar_transaccion y crear_ticket. Sin `confirmado=true`
 estas tools NO ejecutan: devuelven 'requiere_confirmacion' para que el agente
 pregunte al usuario antes de corregir, anular o escalar.
 
+Renegociación (fase 11 — presupuestos por chat): se AÑADE configurar_presupuesto,
+que reutiliza el mismo upsert (`save_budget`) del endpoint de la webapp para dar
+paridad chat ↔ web. Las firmas previas no cambian.
+
 INVARIANTE DE SEGURIDAD (§7.3.2): el `user_id` NUNCA es parámetro de ninguna
 tool. Lo resuelve el `Repository` desde el teléfono del webhook. Aunque el
 modelo "quisiera" pedir datos de otro usuario, no tiene cómo expresarlo — el
@@ -217,6 +221,52 @@ CONSULTAR_PRESUPUESTO = {
     #    "gastado": number, "restante": number|null, "porcentaje": number|null}
 }
 
+# --- H2: crear/actualizar un presupuesto por chat ----------------------------
+CONFIGURAR_PRESUPUESTO = {
+    "name": "configurar_presupuesto",
+    "description": (
+        "Crea o actualiza el presupuesto del usuario para una categoría y "
+        "periodo ('ponme un límite de 100 en comida al mes'). Si ya existía un "
+        "límite para esa categoría/periodo lo reemplaza y el retorno trae el "
+        "monto anterior — menciónale el cambio al usuario. El sistema le "
+        "avisará solo cuando se acerque al límite (umbral de alerta). No la "
+        "uses para registrar movimientos ni para consultar cómo va: para eso "
+        "están registrar_gasto y consultar_presupuesto."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "categoria": {
+                "type": "string",
+                "description": "Categoría del presupuesto (ej. 'comida', 'transporte').",
+            },
+            "monto_limite": {
+                "type": "number",
+                "description": "Límite del presupuesto, positivo. Omitir si el usuario no lo dio.",
+            },
+            "periodo": {
+                "type": "string",
+                "enum": ["semanal", "mensual", "anual"],
+                "description": "Periodo del límite. Por defecto 'mensual'.",
+            },
+            "umbral_alerta": {
+                "type": "number",
+                "description": (
+                    "Fracción del límite [0..1] que dispara la alerta proactiva "
+                    "(0.8 = avisar al 80%). Solo si el usuario lo pide; por "
+                    "defecto 0.8, y al actualizar se conserva el que tenía."
+                ),
+            },
+        },
+        "required": ["categoria"],
+    },
+    # Retorno documentado:
+    #   {"budget_id": str, "categoria": str, "monto_limite": number,
+    #    "periodo": str, "umbral_alerta": number,
+    #    "anterior_monto_limite": number|null}  (número previo si fue actualización)
+    #   o {"error": "faltan_datos", "faltantes": [str]} si falta categoría o monto.
+}
+
 # --- H3: responder soporte desde el corpus (grounded) -----------------------
 RESPONDER_SOPORTE = {
     "name": "responder_soporte",
@@ -405,6 +455,7 @@ TOOLS: list[dict] = [
     EDITAR_TRANSACCION,
     ELIMINAR_TRANSACCION,
     CONSULTAR_PRESUPUESTO,
+    CONFIGURAR_PRESUPUESTO,
     RESPONDER_SOPORTE,
     CREAR_TICKET,
 ]

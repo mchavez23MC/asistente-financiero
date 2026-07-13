@@ -86,6 +86,7 @@ def test_set_de_tools():
         "editar_transaccion",
         "eliminar_transaccion",
         "consultar_presupuesto",
+        "configurar_presupuesto",
         "responder_soporte",
         "crear_ticket",
     }
