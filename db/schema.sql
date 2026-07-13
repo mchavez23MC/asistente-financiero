@@ -65,6 +65,21 @@ create table if not exists transactions (
                  check (status in ('confirmada','pendiente_confirmacion','anulada')),
     created_at timestamptz not null default now()
 );
+-- Migración in situ: si la tabla `transactions` YA existía sin `tipo` (base
+-- creada antes de los ingresos), `create table if not exists` no agrega la
+-- columna. Este ALTER idempotente la añade —los datos previos quedan como
+-- 'gasto'— y así este archivo único sirve para una base nueva o una existente.
+alter table transactions
+    add column if not exists tipo text not null default 'gasto';
+do $$
+begin
+    if not exists (
+        select 1 from pg_constraint where conname = 'transactions_tipo_check'
+    ) then
+        alter table transactions
+            add constraint transactions_tipo_check check (tipo in ('gasto','ingreso'));
+    end if;
+end $$;
 create index if not exists idx_transactions_user on transactions (user_id, fecha desc);
 -- A lo sumo una transacción pendiente por usuario Y tipo (el loop de confirmación
 -- de H1): así un ingreso a medias no pisa a un gasto a medias, ni viceversa.
