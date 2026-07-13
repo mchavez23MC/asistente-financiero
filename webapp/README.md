@@ -1,29 +1,54 @@
-# 🖥️ Luca — Frontend web (conectado al backend)
+# 🖥️ Luca — Webapp (vistas del backend)
 
-Centro de vista de usuario de **Luca**. En esta rama la webapp está **servida por
-el propio backend FastAPI** (montada como estáticos en `/`) y las vistas clave
-consumen datos reales vía `assets/js/api.js`:
+Centro de vista de usuario de **Luca**. Las vistas son **endpoints del backend
+FastAPI con URL limpia** (nada de rutas `.html`; los archivos de esta carpeta
+son un detalle interno de implementación — la URL es el contrato). Solo los
+assets css/js se sirven como estáticos bajo `/assets`.
 
-| Página | Estado | Fuente de datos |
+## Estructura de URLs
+
+| URL | Vista | Datos |
 |---|---|---|
-| `index.html` (login) | ✅ real | teléfono E.164 → localStorage (identidad demo, igual que WhatsApp) |
-| `app/chat.html` | ✅ real | `POST /api/chat` → pipeline completo (consentimiento → guardrail → agente Claude) |
-| `app/inicio.html` | ✅ real | `GET /api/estado` (gastos, presupuestos, alertas calculadas por el sistema) |
-| `app/movimientos.html` | ✅ real | `GET /api/estado` · "Nuevo" y confirmaciones van por `POST /api/chat` |
-| `app/presupuestos.html` | ✅ real | `GET /api/estado` + `POST /api/presupuestos` (upsert) |
-| `app/tickets.html` | ✅ real | `GET /api/estado` · "Contactar" va por el pipeline (guardrail escala) |
-| resto (insights, recurrentes, soporte, cuenta, reporte…) | 🔶 demo | mock de `data.js`, con banner visible "vista de demostración" |
+| `/` | Login en 2 pasos: teléfono → **código OTP por WhatsApp** | `POST /api/auth/solicitar` · `POST /api/auth/verificar` |
+| `/app/inicio` | Dashboard (gastado, donut, presupuestos, alertas) | `GET /api/estado` |
+| `/app/chat` | Chat con Luca — pipeline real (guardrail → agente Claude) | `POST /api/chat` |
+| `/app/movimientos` | Movimientos + bandeja por confirmar | `GET /api/estado` · confirmaciones vía `POST /api/chat` |
+| `/app/presupuestos` | Presupuestos con umbral configurable (H2) | `GET /api/estado` · `POST /api/presupuestos` |
+| `/app/tickets` | Mis tickets (H3) | `GET /api/estado` · "Contactar" vía `POST /api/chat` |
+| `/legal` | Términos y política de privacidad (LOPDP) | estático |
+
+**API JSON** (todas menos `/api/auth/*` exigen `Authorization: Bearer <token>`):
+`POST /api/auth/solicitar` · `POST /api/auth/verificar` · `POST /api/auth/salir` ·
+`GET /api/estado` · `POST /api/chat` · `POST /api/presupuestos`.
+
+## Autenticación (cómo entra un usuario)
+
+1. Escribe su teléfono → el backend genera un **código de 6 dígitos** y se lo
+   envía **por WhatsApp** (el mismo canal Twilio del producto).
+2. Escribe el código → recibe un token de sesión (7 días) con el que la UI llama
+   al API. **La identidad sale siempre de la sesión**: nadie puede consultar
+   datos de un número que no controla.
+
+Políticas aplicadas (OWASP MFA / NIST 800-63B): código hasheado en reposo, TTL
+5 min, un solo uso, máx. 5 intentos, comparación en tiempo constante, cooldown
+de reenvío 60 s, token de 256 bits guardado como hash. Diseño en
+`app/application/auth.py`; tablas `auth_codes` y `sessions` en `db/schema.sql`.
+
+> **Demo sin sandbox:** si el número no está unido al sandbox de Twilio, el OTP
+> no llega. Para demos existe `AUTH_DEMO_OTP` en `.env` (código maestro,
+> apagado por defecto; jamás en producción).
 
 ## Cómo abrirlo
 
 ```bash
-uv run uvicorn app.main:app --port 8080     # desde la raíz del repo
-# abre http://localhost:8080/  → login → escribe tu teléfono → app
+# 1. Ejecutar db/schema.sql en Supabase (incluye auth_codes y sessions)
+# 2. Desde la raíz del repo:
+uv run uvicorn app.main:app --port 8080
+# abre http://localhost:8080/  → teléfono → código por WhatsApp → app
 ```
 
-El primer mensaje que envíes por el chat te pedirá el consentimiento (LOPDP),
-igual que por WhatsApp: es el MISMO orquestador. Los gastos que registres por
-WhatsApp aparecen en la web y viceversa (misma DB, mismo `user_id` por teléfono).
+Los gastos que registres por WhatsApp aparecen en la web y viceversa (misma DB,
+mismo usuario por teléfono).
 
 ## Decisiones técnicas (por qué así)
 
@@ -31,41 +56,29 @@ WhatsApp aparecen en la web y viceversa (misma DB, mismo `user_id` por teléfono
 - **Portable a Jinja2/HTMX** (el stack real de E5): es HTML plano con clases, se copia casi 1:1 a plantillas del backend.
 - **Solo tokens del design kit.** `assets/css/tokens.css` es copia de `design/tokens.css`. Ningún color inventado.
 
-## Estructura
+## Estructura de archivos (interno — las URLs de arriba son el contrato)
 
 ```
 webapp/
-  index.html          Login
-  registro.html       Registro + verificación OTP
-  recuperar.html      Recuperar contraseña (solicitud → OTP → nueva → éxito)
-  onboarding.html     Wizard de primera sesión (5 pasos)
-  legal.html          Términos y privacidad (LOPDP)
-  app/
-    inicio.html       Dashboard (flujo neto, donut, cash flow, presupuestos, insights)
-    chat.html         Chat con Luca (motor de respuestas mock por palabras clave)
-    movimientos.html  Lista + filtros + "Por confirmar" + detalle + nuevo/editar + eliminar
-    presupuestos.html Lista + crear/editar + detalle con proyección
-    insights.html     Feed de alertas e insights + detalle + modal de duplicado
-    recurrentes.html  Suscripciones + recordatorios
-    soporte.html      Centro de ayuda (búsqueda con respuesta directa) + artículos
-    tickets.html      Mis tickets + detalle con transcript (H3)
-    cuenta.html       Perfil, preferencias, notificaciones, seguridad, datos/privacidad, canales
-    reporte.html      Reporte mensual
-    404.html · error.html
-  assets/
+  index.html          Vista del login OTP (servida en /)
+  legal.html          Términos y privacidad LOPDP (servida en /legal)
+  app/                Vistas de la app (servidas en /app/*)
+    inicio.html · chat.html · movimientos.html · presupuestos.html · tickets.html
+  assets/             Únicos estáticos públicos (/assets/*)
     css/tokens.css    Design tokens (copia del kit)
     css/app.css       Componentes y responsive
-    js/data.js        Datos mock (usuario demo + movimientos con los patrones de E2 §15)
+    js/data.js        Catálogo de categorías + helpers de formato (sin datos de ejemplo)
+    js/api.js         Sesión Bearer + llamadas al API + mapeo de schema
     js/ui.js          Íconos (Lucide inline), toasts, modales, tema
     js/shell.js       Sidebar (desktop) + bottom nav (mobile) + topbar + notificaciones
-    js/charts.js      Donut, cash flow, proyección, mini-barras, sparkline (SVG)
+    js/charts.js      Donut, proyección (SVG a mano)
 ```
 
 ## Qué está cubierto (las 3 historias del PDF)
 
-- **H1 Registro conversacional** → `chat.html` (interpreta, clasifica, pide confirmación) + `movimientos.html` (bandeja "Por confirmar", detalle con texto original y confianza).
-- **H2 Presupuesto e insights** → `presupuestos.html` (límite + umbral configurable) + `insights.html` (alertas, proyección, duplicados, sin consejo de inversión) + banner de alerta en el dashboard.
-- **H3 Soporte + escalamiento** → `soporte.html` (KB aprobada) + `tickets.html` (ticket con historial, contexto y prioridad). El chat escala consultas sensibles a ticket directo.
+- **H1 Registro conversacional** → `/app/chat` (agente Claude real: interpreta, clasifica, pide confirmación) + `/app/movimientos` (bandeja "Por confirmar" que completa datos por el mismo pipeline).
+- **H2 Presupuesto e insights** → `/app/presupuestos` (límite + umbral configurable persistidos) + alertas calculadas por el sistema en el dashboard, sin consejo de inversión.
+- **H3 Soporte + escalamiento** → el chat escala lo sensible vía guardrail; `/app/tickets` muestra el ticket con contexto y prioridad (cola humana en `/panel`).
 
 ## Reglas de marca aplicadas (checklist)
 
@@ -76,14 +89,9 @@ webapp/
 - Modo claro y oscuro (toggle en topbar y en Preferencias); tokens ya resuelven ambos.
 - Responsive: sidebar en desktop, bottom nav de 5 con chat central en mobile.
 
-## Conectar el backend real
-
-Reemplazar `assets/js/data.js` y las llamadas mock por `fetch` al API de E5. Contratos clave que el front ya espera:
-- Chat: `POST /api/chat {user_id, text}` → `{reply, cards?}` (ver `chat.html`).
-- El resto de vistas consumen listas (`transactions`, `budgets`, `insights`, `tickets`) con la forma de `data.js`.
-
 ## Pendiente / siguiente iteración
 
 - Assets de la mascota (ardilla) — hoy el avatar es el placeholder "L" dorado.
-- Importar CSV: el wizard de 3 pasos está diseñado en [PLAN.md](PLAN.md) §3 (C8) pero implementado como acceso directo (toast) — construir la vista completa.
-- Coach marks del tour (B6) y swipe actions en móvil (P2).
+- Ingresos, saldo e importación de CSV (gap conocido de H1 — contratos en E2 §7 y E7).
+- Vistas de insights avanzados, recurrentes y cuenta (se retiraron los mocks;
+  se reconstruyen cuando exista el backend que las alimente).

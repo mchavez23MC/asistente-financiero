@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luca — Chat</title>
-  <link rel="stylesheet" href="../assets/css/tokens.css">
-  <link rel="stylesheet" href="../assets/css/app.css">
+  <link rel="stylesheet" href="/assets/css/tokens.css">
+  <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body>
   <div class="layout">
@@ -29,15 +29,16 @@
   </div>
   <nav id="app-bottomnav"></nav>
 
-  <script src="../assets/js/data.js"></script>
-  <script src="../assets/js/api.js"></script>
-  <script src="../assets/js/ui.js"></script>
-  <script src="../assets/js/shell.js"></script>
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/ui.js"></script>
+  <script src="/assets/js/shell.js"></script>
   <script>
     // Chat REAL: cada mensaje va por POST /api/chat al mismo pipeline que
     // WhatsApp (consentimiento → guardrail fail-closed → agente Claude con tools).
     LUCA.requirePhone();
     LUCA.shell({ active: 'chat', title: 'Chat con Luca' });
+    LUCA.loadReal().catch(function () {});  // parchea nombre/iniciales reales del sidebar
     document.getElementById('send-btn').innerHTML = LUCA.icon('send');
     var inner = document.getElementById('chat-inner'), body = document.getElementById('chat-body');
     function scrollDown() { body.scrollTop = body.scrollHeight; }

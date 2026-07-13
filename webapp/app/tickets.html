@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luca — Mis tickets</title>
-  <link rel="stylesheet" href="../assets/css/tokens.css">
-  <link rel="stylesheet" href="../assets/css/app.css">
+  <link rel="stylesheet" href="/assets/css/tokens.css">
+  <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body>
   <div class="layout">
@@ -33,17 +33,17 @@
   <div class="overlay" id="contact-overlay">
     <div class="modal" onclick="event.stopPropagation()">
       <div class="row-between mb-8"><div class="modal__title" style="margin:0">Contactar al equipo</div><button class="iconbtn" data-close="contact-overlay" id="ctc"></button></div>
-      <div class="banner banner--info mb-16 t-label"><span id="ct-ico"></span>Primero prueba con Luca — resuelve la mayoría al instante. <a href="chat.html">Ir al chat</a></div>
+      <div class="banner banner--info mb-16 t-label"><span id="ct-ico"></span>Primero prueba con Luca — resuelve la mayoría al instante. <a href="/app/chat">Ir al chat</a></div>
       <div class="field"><label class="field__label">Tema</label><select class="select"><option>Cargo que no reconozco</option><option>Problema con mi cuenta</option><option>Duda sobre un proceso</option><option>Otro</option></select></div>
       <div class="field"><label class="field__label">Describe tu caso</label><textarea class="textarea" placeholder="Cuéntanos qué pasó…"></textarea></div>
       <div class="modal__actions"><button class="btn btn--ghost" data-close="contact-overlay">Cancelar</button><button class="btn btn--primary" id="ct-send">Crear ticket</button></div>
     </div>
   </div>
 
-  <script src="../assets/js/data.js"></script>
-  <script src="../assets/js/api.js"></script>
-  <script src="../assets/js/ui.js"></script>
-  <script src="../assets/js/shell.js"></script>
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/ui.js"></script>
+  <script src="/assets/js/shell.js"></script>
   <script>
     LUCA.shell({ active: 'soporte', title: 'Mis tickets' });
     document.getElementById('ctc').innerHTML = LUCA.icon('x');
@@ -83,14 +83,10 @@
         (bubbles ? '<div class="card mb-16"><div class="card__head"><span class="card__title">Conversación</span></div>' +
         '<div class="chat__scroll-inner" style="max-width:none;gap:8px">' + bubbles + '</div></div>' : '') +
         (replies ? '<div class="mb-16"><div class="t-label muted mb-8">Respuestas del equipo</div>' + replies + '</div>' : '') +
-        (t.status === 'done' ? '<div class="card row-between" style="background:var(--luca-income-bg);border:0"><span class="t-label" style="color:var(--luca-income-text)">¿Quedó resuelto?</span><div class="row gap-8"><button class="iconbtn" id="tk-yes"></button><button class="iconbtn" id="tk-no"></button></div></div>' :
-          '<div class="card"><label class="field__label">Añadir información</label><textarea class="textarea mb-8" placeholder="Escribe una respuesta…"></textarea><button class="btn btn--primary btn--sm" id="tk-reply">Enviar</button></div>');
+        '<p class="muted t-label">El equipo humano da seguimiento a este ticket; si necesitas añadir algo, escríbelo en el <a href="/app/chat">chat</a>.</p>';
       document.getElementById('list-view').classList.add('hide');
       document.getElementById('detail-view').classList.remove('hide');
       window.scrollTo(0, 0);
-      var y = document.getElementById('tk-yes'); if (y) { y.innerHTML = LUCA.icon('thumbs-up'); y.addEventListener('click', function () { LUCA.toast('¡Nos alegra! Ticket cerrado'); }); }
-      var no = document.getElementById('tk-no'); if (no) { no.innerHTML = LUCA.icon('thumbs-down'); no.addEventListener('click', function () { LUCA.toast('Reabrimos tu ticket', { type: 'info' }); }); }
-      var rep = document.getElementById('tk-reply'); if (rep) rep.addEventListener('click', function () { LUCA.toast('Respuesta enviada'); });
     }
     document.getElementById('back-btn').addEventListener('click', function () { document.getElementById('detail-view').classList.add('hide'); document.getElementById('list-view').classList.remove('hide'); });
 

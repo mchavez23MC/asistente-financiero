@@ -79,8 +79,14 @@ responder el `200 OK` del webhook rápido y hacer el trabajo del LLM en backgrou
 - **WhatsApp Cloud API (Meta)** — se conserva como **ejemplo** para empresas con
   acceso directo a la Cloud API (`whatsapp_meta.py` + `interfaces/api/webhook.py`,
   con handshake GET y firma `X-Hub-Signature-256`). **No se cablea** en `main.py`.
+- **Webapp de usuario (rama webapp)** — vistas como endpoints con URL limpia
+  (`/`, `/app/inicio`, `/app/chat`, `/app/movimientos`, `/app/presupuestos`,
+  `/app/tickets`, `/legal`) sobre un API JSON autenticado con **OTP por
+  WhatsApp** (`/api/auth/*`, `/api/estado`, `/api/chat`, `/api/presupuestos`).
+  Estructura completa de URLs y políticas de auth en
+  [`webapp/README.md`](webapp/README.md).
 - **Chat web (plan B)** — `GET /chat` + `POST /chat/send`, mismo núcleo, para
-  demostrar sin depender de WhatsApp.
+  demostrar sin depender de WhatsApp (usuario sintético fijo).
 - **Panel humano** — `/panel` (auth básica): cola de tickets, detalle, cambiar
   estado, responder al usuario y vista de audit trail.
 - **Legales** — `/privacidad` y `/terminos`.
@@ -97,7 +103,12 @@ APScheduler · Jinja2. Gestión de deps con **uv** (`uv.lock`).
 
 Tablas Supabase (`db/schema.sql`): `users`, `categories`, `messages`,
 `transactions` (gastos e ingresos, columna `tipo`), `budgets`, `tickets`,
-`alerts`, `recurring_incomes`, `income_reminders`.
+`alerts`, `recurring_incomes`, `income_reminders`, `auth_codes`, `sessions`.
+
+> **Migración (auth de la webapp):** si el proyecto Supabase ya tenía el schema
+> anterior, ejecuta [`db/migracion-webapp-auth.sql`](db/migracion-webapp-auth.sql)
+> en el SQL Editor — agrega solo `auth_codes` y `sessions` (idempotente, no
+> toca lo existente). Instrucciones paso a paso dentro del archivo.
 
 ## Puesta en marcha (local)
 

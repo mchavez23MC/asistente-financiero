@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Luca — Presupuestos</title>
-  <link rel="stylesheet" href="../assets/css/tokens.css">
-  <link rel="stylesheet" href="../assets/css/app.css">
+  <link rel="stylesheet" href="/assets/css/tokens.css">
+  <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body>
   <div class="layout">
@@ -37,7 +37,7 @@
   <aside class="drawer" id="bd-drawer" aria-label="Detalle de presupuesto">
     <div class="drawer__head"><div class="drawer__title" id="bd-title">Presupuesto</div><div class="spacer"></div><button class="iconbtn" data-close="bd-drawer" id="bdc"></button></div>
     <div class="drawer__body" id="bd-body"></div>
-    <div class="drawer__foot"><button class="btn btn--outline" id="bd-edit">Editar</button><div class="spacer"></div><button class="btn btn--ghost" id="bd-pause">Pausar</button></div>
+    <div class="drawer__foot"><button class="btn btn--outline" id="bd-edit">Editar</button></div>
   </aside>
 
   <!-- Modal crear/editar -->
@@ -57,11 +57,11 @@
     </div>
   </div>
 
-  <script src="../assets/js/data.js"></script>
-  <script src="../assets/js/api.js"></script>
-  <script src="../assets/js/ui.js"></script>
-  <script src="../assets/js/charts.js"></script>
-  <script src="../assets/js/shell.js"></script>
+  <script src="/assets/js/data.js"></script>
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/ui.js"></script>
+  <script src="/assets/js/charts.js"></script>
+  <script src="/assets/js/shell.js"></script>
   <script>
     LUCA.shell({ active: 'presupuestos', title: 'Presupuestos' });
     ['bdc','bnc'].forEach(function(id){ document.getElementById(id).innerHTML = LUCA.icon('x'); });
@@ -117,8 +117,7 @@
     }
     document.getElementById('bd-overlay').addEventListener('click', function () { this.classList.remove('is-open'); document.getElementById('bd-drawer').classList.remove('is-open'); });
     document.getElementById('bd-edit').addEventListener('click', function () { document.getElementById('bd-drawer').classList.remove('is-open'); document.getElementById('bd-overlay').classList.remove('is-open'); openNew(curBudget); });
-    document.getElementById('bd-pause').addEventListener('click', function () { LUCA.toast('Presupuesto pausado'); });
-
+    
     // crear/editar
     function openNew(id) {
       var editing = !!id;
@@ -148,9 +147,9 @@
       if (!limit || limit <= 0) return LUCA.toast('Ingresa un límite válido', { type: 'error' });
       var code = document.getElementById('bnew-cat').value, th = document.getElementById('bnew-th').value / 100;
       LUCA.closeModal('bnew-overlay'); LUCA.toast('Guardando…');
-      fetch('/api/presupuestos', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telefono: LUCA.phone(), categoria: LUCA.catToBackend(code),
+      LUCA.api('/api/presupuestos', {
+        method: 'POST',
+        body: JSON.stringify({ categoria: LUCA.catToBackend(code),
                                monto_limite: limit, periodo: 'mensual', umbral_alerta: th })
       }).then(function (r) { if (!r.ok) throw new Error('presupuesto ' + r.status); })
         .then(function () { LUCA.toast('Presupuesto guardado ✅'); location.reload(); })

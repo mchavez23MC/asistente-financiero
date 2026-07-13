@@ -52,6 +52,8 @@ class Settings:
     scheduler_habilitado: bool
     scheduler_intervalo_min: int
     aviso_espera_umbral_s: float
+    # Código maestro de OTP para demos (vacío = apagado). NUNCA en producción.
+    auth_demo_otp: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -90,4 +92,5 @@ class Settings:
             in ("1", "true", "yes"),
             scheduler_intervalo_min=int(os.environ.get("SCHEDULER_INTERVALO_MIN", "30")),
             aviso_espera_umbral_s=float(os.environ.get("AVISO_ESPERA_UMBRAL_S", "2.0")),
+            auth_demo_otp=os.environ.get("AUTH_DEMO_OTP", ""),
         )

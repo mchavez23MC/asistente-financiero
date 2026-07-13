@@ -23,6 +23,11 @@ from app.domain.models import (
     Category,
     Message,
     RecurringIncome,
+    AuthCode,
+    Budget,
+    Category,
+    Message,
+    Session,
     Ticket,
     Transaction,
     User,
@@ -329,6 +334,48 @@ class SupabaseRepository:
         self._db.table("income_reminders").insert(
             {"recurring_id": str(recurring_id), "periodo_clave": periodo_clave}
         ).execute()
+    # --- autenticación de la webapp (OTP + sesiones) ---------------------------
+    def save_auth_code(self, code: AuthCode) -> AuthCode:
+        res = self._db.table("auth_codes").insert(_dump(code)).execute()
+        return AuthCode(**res.data[0])
+
+    def get_auth_code_activo(self, telefono: str) -> Optional[AuthCode]:
+        res = (
+            self._db.table("auth_codes")
+            .select("*")
+            .eq("telefono", telefono)
+            .eq("usado", False)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return AuthCode(**res.data[0]) if res.data else None
+
+    def incrementar_intentos_codigo(self, code_id: UUID) -> int:
+        actual = (
+            self._db.table("auth_codes").select("intentos").eq("id", str(code_id)).execute()
+        )
+        intentos = (actual.data[0]["intentos"] if actual.data else 0) + 1
+        self._db.table("auth_codes").update({"intentos": intentos}).eq(
+            "id", str(code_id)
+        ).execute()
+        return intentos
+
+    def marcar_codigo_usado(self, code_id: UUID) -> None:
+        self._db.table("auth_codes").update({"usado": True}).eq("id", str(code_id)).execute()
+
+    def create_session(self, session: Session) -> Session:
+        res = self._db.table("sessions").insert(session.model_dump(mode="json")).execute()
+        return Session(**res.data[0])
+
+    def get_session(self, token_hash: str) -> Optional[Session]:
+        res = (
+            self._db.table("sessions").select("*").eq("token_hash", token_hash).limit(1).execute()
+        )
+        return Session(**res.data[0]) if res.data else None
+
+    def delete_session(self, token_hash: str) -> None:
+        self._db.table("sessions").delete().eq("token_hash", token_hash).execute()
 
 
 def _inicio_periodo(periodo: str):

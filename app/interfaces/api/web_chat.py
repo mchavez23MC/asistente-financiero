@@ -26,15 +26,15 @@ router = APIRouter()
 _PAGINA = r"""
 <!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>E5 · Chat web (plan B)</title>
+<title>Luca · Chat web (plan B)</title>
 <script src="https://cdn.tailwindcss.com"></script></head>
 <body class="bg-slate-100">
 <div class="max-w-lg mx-auto p-4">
-  <h1 class="text-xl font-bold mb-2">E5 · Asistente financiero <span class="text-slate-400 text-sm">(plan B)</span></h1>
+  <h1 class="text-xl font-bold mb-2">Luca · Asistente financiero <span class="text-slate-400 text-sm">(plan B)</span></h1>
   <div id="chat" class="bg-white rounded shadow p-3 h-96 overflow-y-auto space-y-2 text-sm"></div>
   <form id="f" class="mt-3 flex gap-2">
     <input id="t" required placeholder="Escribe un mensaje…" class="flex-1 border rounded px-3 py-2">
-    <button class="bg-blue-600 text-white px-4 rounded">Enviar</button>
+    <button class="text-slate-900 px-4 rounded font-semibold" style="background:#F5B301">Enviar</button>
   </form>
 </div>
 <script>
@@ -43,7 +43,7 @@ function burbuja(txt, mine){
   const d = document.createElement('div');
   d.className = 'flex ' + (mine ? 'justify-end' : 'justify-start');
   d.innerHTML = '<div class="max-w-[80%] px-3 py-2 rounded-lg '
-    + (mine ? 'bg-blue-600 text-white' : 'bg-slate-100') + '">' + txt + '</div>';
+    + (mine ? 'text-white" style="background:#1F3A5F' : 'bg-slate-100') + '">' + txt + '</div>';
   chat.appendChild(d); chat.scrollTop = chat.scrollHeight;
 }
 function typing(){
@@ -108,8 +108,11 @@ async def pagina() -> HTMLResponse:
 @router.post("/chat/send")
 async def enviar(request: Request) -> JSONResponse:
     body = await request.json()
-    # Teléfono sintético estable por sesión de demo (identidad del web chat).
-    telefono = body.get("telefono") or "+50300000001"
+    # Identidad FIJA del plan B: un único usuario sintético de demo. No se
+    # acepta un teléfono del cliente — eso permitiría leer/escribir la
+    # conversación de otro número sin autenticarse (la webapp usa /api/chat
+    # con sesión OTP; este endpoint existe solo para demostrar sin WhatsApp).
+    telefono = "+50300000001"
     canal = WebChatCapturingChannel(telefono)
 
     pm = ProcessMessage(
@@ -136,7 +139,9 @@ async def stream(request: Request) -> StreamingResponse:
     por SSE, para que el usuario vea a Luca escribir desde ~0.5s en vez de esperar
     en blanco. Fallback sin streaming: POST /chat/send (JSON)."""
     body = await request.json()
-    telefono = body.get("telefono") or "+50300000001"
+    # Identidad FIJA del plan B (igual que /chat/send): no se acepta un teléfono
+    # del cliente — eso permitiría usar la conversación de otro número sin auth.
+    telefono = "+50300000001"
     canal = WebChatCapturingChannel(telefono)
     pm = ProcessMessage(
         repo=request.app.state.repo,

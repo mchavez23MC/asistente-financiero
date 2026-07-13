@@ -26,7 +26,9 @@ class WebChatCapturingChannel:
             canal=self.canal,
             telefono=self._telefono,
             texto=str(payload.get("texto", "")).strip(),
-            nombre_perfil=payload.get("nombre") or "Web",
+            # Sin nombre real no se inventa uno: 'Web' es el canal, no la persona
+            # (get_or_create_user guardaría ese literal como nombre del usuario).
+            nombre_perfil=payload.get("nombre") or None,
         )
 
     async def send(self, user: User, text: str) -> None:

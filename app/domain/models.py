@@ -249,6 +249,32 @@ class Ticket(BaseModel):
     resuelto_at: Optional[datetime] = None
 
 
+class AuthCode(BaseModel):
+    """Código OTP de acceso a la webapp, enviado por WhatsApp.
+
+    Prácticas aplicadas (OWASP MFA cheat sheet / NIST 800-63B):
+    - Solo se persiste el HASH del código (sha256 con el teléfono como contexto).
+    - Expira a los pocos minutos, es de un solo uso y admite pocos intentos.
+    """
+
+    id: Optional[UUID] = None
+    telefono: str
+    codigo_hash: str
+    expira_at: datetime
+    intentos: int = 0
+    usado: bool = False
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class Session(BaseModel):
+    """Sesión web emitida al verificar el OTP. Se guarda el hash del token."""
+
+    token_hash: str
+    user_id: UUID
+    expira_at: datetime
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 # ---------------------------------------------------------------------------
 # DTOs de frontera (no se persisten como tal; son el "formato canónico")
 # ---------------------------------------------------------------------------
