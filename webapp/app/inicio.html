@@ -13,10 +13,10 @@
     <div class="content">
       <header id="app-topbar"></header>
       <main class="page">
-        <div id="greeting" class="mb-16"></div>
+        <div id="greeting" class="mb-16"><h1 class="t-h1">Hola 👋</h1><p class="muted">Cargando tus cuentas…</p></div>
 
         <!-- Banner de alerta -->
-        <div class="banner banner--alert mb-16" id="alert-banner">
+        <div class="banner banner--alert mb-16 hide" id="alert-banner">
           <span id="ab-ico"></span>
           <div><strong>Ojo con Restaurantes:</strong> vas $199.00 de $200.00 este mes.</div>
           <div class="banner__actions">
@@ -111,13 +111,13 @@
     document.getElementById('ab-close').innerHTML = LUCA.icon('x');
     document.getElementById('ab-close').addEventListener('click', function () { document.getElementById('alert-banner').classList.add('hide'); });
 
-    // Banner: primera alerta real de presupuesto, o se oculta si no hay.
+    // Banner: primera alerta real de presupuesto; arranca oculto (hide) para
+    // no mostrar el texto de ejemplo mientras cargan los datos.
     var alerta = (LUCA.insights || []).filter(function (i) { return i.severity === 'alert'; })[0];
     if (alerta) {
       document.getElementById('alert-banner').querySelector('div').innerHTML =
         '<strong>' + alerta.title + ':</strong> ' + alerta.body;
-    } else {
-      document.getElementById('alert-banner').classList.add('hide');
+      document.getElementById('alert-banner').classList.remove('hide');
     }
 
     document.getElementById('hero-net').innerHTML = '<span class="luca-amount">' + LUCA.fmt(s.expenses) + '</span>';
@@ -145,6 +145,10 @@
 
     // presupuestos mini (top 3 por uso)
     var top = LUCA.budgets.slice().sort(function (a, b) { return (b.spent / b.limit) - (a.spent / a.limit); }).slice(0, 3);
+    if (!top.length) {
+      document.getElementById('budgets-mini').innerHTML =
+        '<p class="muted t-label">Aún no tienes presupuestos. <a href="presupuestos.html">Crea el primero</a> y Luca te avisa antes de pasarte.</p>';
+    } else
     document.getElementById('budgets-mini').innerHTML = top.map(function (b) {
       var cat = LUCA.cat(b.code), pct = b.spent / b.limit, cls = pct >= 1 ? 'is-over' : pct >= b.threshold ? 'is-warn' : '';
       return '<div><div class="row-between mb-8"><span class="t-label">' + cat.emoji + ' ' + cat.name + '</span>' +
@@ -153,6 +157,10 @@
     }).join('');
 
     // insights mini
+    if (!LUCA.insights.length) {
+      document.getElementById('insights-mini').innerHTML =
+        '<p class="muted t-label">Todo tranquilo por ahora. Cuando algo pida tu atención, te lo muestro aquí.</p>';
+    } else
     document.getElementById('insights-mini').innerHTML = LUCA.insights.slice(0, 3).map(function (i) {
       var ic = i.severity === 'alert' ? 'alert' : 'sparkles';
       var col = i.severity === 'alert' ? 'var(--luca-alert-text)' : 'var(--luca-navy)';

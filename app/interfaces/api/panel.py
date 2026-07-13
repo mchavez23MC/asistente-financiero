@@ -23,12 +23,12 @@ security = HTTPBasic()
 _BASE = """
 <!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Panel{% endblock %} · E5</title>
+<title>{% block title %}Panel{% endblock %} · Luca</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 </head><body class="bg-slate-100 text-slate-800">
-<nav class="bg-slate-900 text-white px-6 py-3 flex gap-6 items-center">
-  <span class="font-bold">E5 · Panel humano</span>
+<nav style="background:#1F3A5F" class="text-white px-6 py-3 flex gap-6 items-center">
+  <span class="font-bold">Luca · Panel humano</span>
   <a href="/panel" class="hover:underline">Tickets</a>
   <a href="/panel/audit" class="hover:underline">Audit trail</a>
 </nav>

@@ -117,10 +117,17 @@ window.LUCA = window.LUCA || {};
     _p = fetch('/api/estado?telefono=' + encodeURIComponent(tel))
       .then(function (r) { if (!r.ok) throw new Error('estado ' + r.status); return r.json(); })
       .then(function (d) {
-        LUCA.today = new Date().toISOString().slice(0, 10);
-        LUCA.user.name = d.user.nombre || 'pana';
+        // Fecha LOCAL del navegador (no UTC): Ecuador es UTC-5 y toISOString
+        // haría que un gasto de hoy en la noche se muestre como "Ayer".
+        var hoy = new Date();
+        LUCA.today = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') +
+                     '-' + String(hoy.getDate()).padStart(2, '0');
+        // 'Web' es el nombre del canal (usuarios creados desde el chat web
+        // antiguo), no el de la persona — no saludar "Hola, Web".
+        var nombre = (d.user.nombre && d.user.nombre !== 'Web') ? d.user.nombre : null;
+        LUCA.user.name = nombre || 'pana';
         LUCA.user.phone = d.user.telefono;
-        LUCA.user.initials = (d.user.nombre || 'L')[0].toUpperCase();
+        LUCA.user.initials = (nombre || 'U')[0].toUpperCase();
 
         LUCA.transactions = d.transactions.map(mapTx);
         LUCA.budgets = d.budgets.map(mapBudget);

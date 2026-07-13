@@ -38,6 +38,7 @@
     // WhatsApp (consentimiento → guardrail fail-closed → agente Claude con tools).
     LUCA.requirePhone();
     LUCA.shell({ active: 'chat', title: 'Chat con Luca' });
+    LUCA.loadReal().catch(function () {});  // parchea nombre/iniciales reales del sidebar
     document.getElementById('send-btn').innerHTML = LUCA.icon('send');
     var inner = document.getElementById('chat-inner'), body = document.getElementById('chat-body');
     function scrollDown() { body.scrollTop = body.scrollHeight; }
