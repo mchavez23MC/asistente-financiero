@@ -155,13 +155,11 @@ class SupabaseRepository:
         limite: int = 5,
         tipo: Optional[str] = None,
         categoria: Optional[str] = None,
+        solo_confirmadas: bool = True,
     ) -> list[Transaction]:
-        q = (
-            self._db.table("transactions")
-            .select("*")
-            .eq("user_id", str(user_id))
-            .eq("status", "confirmada")
-        )
+        q = self._db.table("transactions").select("*").eq("user_id", str(user_id))
+        if solo_confirmadas:
+            q = q.eq("status", "confirmada")
         if tipo:
             q = q.eq("tipo", tipo)
         if categoria:
@@ -180,17 +178,6 @@ class SupabaseRepository:
             .execute()
         )
         return Transaction(**res.data[0]) if res.data else None
-
-    def list_transactions(self, user_id: UUID, limit: int = 50) -> list[Transaction]:
-        res = (
-            self._db.table("transactions")
-            .select("*")
-            .eq("user_id", str(user_id))
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        return [Transaction(**row) for row in res.data]
 
     # --- presupuesto (H2) — el sistema calcula; Claude explica (§1.2) ---------
     def get_budgets(self, user_id: UUID) -> list[Budget]:

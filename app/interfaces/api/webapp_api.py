@@ -88,7 +88,7 @@ async def estado(request: Request, telefono: str) -> JSONResponse:
     repo = request.app.state.repo
     user = repo.get_or_create_user(telefono)
 
-    transactions = repo.list_transactions(user.id, limit=100)
+    transactions = repo.list_transactions(user.id, limite=100, solo_confirmadas=False)
     budgets = []
     for b in repo.get_budgets(user.id):
         gastado = repo.sum_gastos(user.id, categoria=b.categoria, periodo=b.periodo)

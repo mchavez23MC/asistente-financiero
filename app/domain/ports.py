@@ -160,20 +160,19 @@ class Repository(Protocol):
         limite: int = 5,
         tipo: Optional[str] = None,
         categoria: Optional[str] = None,
+        solo_confirmadas: bool = True,
     ) -> list[Transaction]:
-        """Últimos movimientos confirmados del usuario, más recientes primero
-        (por fecha de registro). Alimenta consultar_movimientos, la detección de
-        duplicados y las correcciones ('borra el último gasto'). Excluye las
-        anuladas y las pendientes."""
+        """Últimos movimientos del usuario, más recientes primero (por fecha de
+        registro). Con `solo_confirmadas=True` (default) excluye anuladas y
+        pendientes: alimenta consultar_movimientos, la detección de duplicados y
+        las correcciones ('borra el último gasto'). Con `solo_confirmadas=False`
+        devuelve todos los estados (vista web, que muestra el status de cada uno).
+        `tipo`/`categoria` filtran opcionalmente."""
         ...
 
     def get_transaction(self, user_id: UUID, transaction_id: UUID) -> Optional[Transaction]:
         """Una transacción por id, SIEMPRE filtrada por user_id (§7.3.2): un id
         de otro usuario devuelve None, nunca la fila ajena."""
-        ...
-
-    def list_transactions(self, user_id: UUID, limit: int = 50) -> list[Transaction]:
-        """Movimientos del usuario, más recientes primero (vista web)."""
         ...
 
     # --- categorías (catálogo de T2) ---

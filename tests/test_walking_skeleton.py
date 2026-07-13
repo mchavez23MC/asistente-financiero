@@ -113,12 +113,16 @@ class FakeRepo:
                 return t
         return None
 
-    def list_transactions(self, user_id, limite=5, tipo=None, categoria=None) -> list[Transaction]:
+    def list_transactions(
+        self, user_id, limite=5, tipo=None, categoria=None, solo_confirmadas=True
+    ) -> list[Transaction]:
         propias = []
-        for t in reversed(self.transactions):  # más recientes primero
+        for t in sorted(self.transactions, key=lambda t: t.created_at, reverse=True):
             status = t.status if isinstance(t.status, str) else t.status.value
             t_tipo = t.tipo if isinstance(t.tipo, str) else t.tipo.value
-            if t.user_id != user_id or status != "confirmada":
+            if t.user_id != user_id:
+                continue
+            if solo_confirmadas and status != "confirmada":
                 continue
             if tipo and t_tipo != tipo:
                 continue
@@ -132,10 +136,6 @@ class FakeRepo:
             if t.id == transaction_id and t.user_id == user_id:
                 return t
         return None
-
-    def list_transactions(self, user_id: UUID, limit: int = 50) -> list[Transaction]:
-        propias = [t for t in self.transactions if t.user_id == user_id]
-        return sorted(propias, key=lambda t: t.created_at, reverse=True)[:limit]
 
     def get_budgets(self, user_id: UUID) -> list:
         return [b for b in self.budgets if b.user_id == user_id]
