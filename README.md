@@ -94,8 +94,11 @@ APScheduler · Jinja2. Gestión de deps con **uv** (`uv.lock`).
 
 Tablas Supabase (`db/schema.sql`): `users`, `categories`, `messages`,
 `transactions`, `budgets`, `tickets`, `alerts`, `auth_codes`, `sessions`.
-(Si tu proyecto ya tenía el schema anterior, re-ejecuta `db/schema.sql`:
-los `create table if not exists` agregan solo las tablas de auth.)
+
+> **Migración (rama webapp):** si el proyecto Supabase ya tenía el schema
+> anterior, ejecuta [`db/migracion-webapp-auth.sql`](db/migracion-webapp-auth.sql)
+> en el SQL Editor — agrega solo `auth_codes` y `sessions` (idempotente, no
+> toca lo existente). Instrucciones paso a paso dentro del archivo.
 
 ## Puesta en marcha (local)
 
