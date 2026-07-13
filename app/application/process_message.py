@@ -36,12 +36,20 @@ from app.domain.ports import AgentRegistry, ChannelAdapter, Guardrail, Repositor
 
 log = logging.getLogger("e5.orquestador")
 
-# Onboarding legal, en la voz de Luca (paso 0; redacción final la coordina T6).
+# Onboarding en la voz de Luca (paso 0): breve presentación de quién es y qué
+# hace + el aviso legal obligatorio (consentimiento). Un usuario nuevo recibe
+# SOLO esto; el agente no corre hasta que hay consentimiento (§7.2).
 AVISO_LEGAL = (
-    "👋 ¡Hola! Soy Luca, tu asistente financiero. Antes de arrancar: guardo tus "
-    "mensajes y gastos para poder ayudarte, y un humano de mi equipo puede "
-    "revisarlos si escalo tu caso. No doy consejos de inversión. Al seguir "
-    "escribiendo aceptas estos términos. ¿En qué te doy una mano?"
+    "👋 ¡Hola! Soy Luca, tu asistente financiero personal por WhatsApp. "
+    "Te doy una mano con tu plata del día a día:\n"
+    "• Anoto tus gastos e ingresos — escríbeme o mándame la foto del recibo\n"
+    "• Llevo tu presupuesto y te aviso cómo vas\n"
+    "• Te muestro y corrijo lo que registraste\n"
+    "• Resuelvo dudas sencillas y, si hace falta, te paso con una persona\n\n"
+    "Antes de arrancar: guardo tus mensajes y movimientos para poder ayudarte, "
+    "y un humano de mi equipo puede revisarlos si escalo tu caso. No doy "
+    "consejos de inversión. Al seguir escribiendo aceptas estos términos. "
+    "¿En qué te ayudo?"
 )
 
 # Ruta sensible (pre-Luca): voz cálida de Luca, sin detalle de por qué se escala.
