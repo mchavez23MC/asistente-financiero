@@ -352,6 +352,131 @@ async def test_varios_registros_una_pasada_confirma_en_lista():
     assert len(repo.transactions) == 2
 
 
+async def test_tres_registros_una_pasada_confirma_en_lista():
+    """Mensaje de voz típico: 'gasté en el café, en el súper y el uber'. El modelo
+    emite 3 registrar_gasto en un turno → se confirman en una lista, sin 2º turno."""
+    repo = FakeRepo()
+    triple = LLMResponse(
+        tool_calls=[
+            ToolCall(id="a", nombre="registrar_gasto", argumentos={"monto": 8, "categoria": "comida", "comercio": "café"}),
+            ToolCall(id="b", nombre="registrar_gasto", argumentos={"monto": 45, "categoria": "hogar", "comercio": "Supermaxi"}),
+            ToolCall(id="c", nombre="registrar_gasto", argumentos={"monto": 6.5, "categoria": "transporte", "comercio": "Uber"}),
+        ],
+        stop_reason="tool_use",
+    )
+    llm = ScriptedLLM([triple])
+    result = await _agente(llm, repo).handle(_contexto(repo, "gasté en el café, el súper y el uber"))
+
+    assert len(llm.llamadas) == 1  # sin 2º turno pese a ser 3 registros
+    assert len(repo.transactions) == 3
+    assert result.respuesta.count("•") == 3  # lista vertical de 3 items
+    assert "8" in result.respuesta and "45" in result.respuesta and "6.50" in result.respuesta
+
+
+async def test_ingreso_y_gasto_una_pasada_confirma_en_lista():
+    """'me pagaron 500 y gasté 30': ingreso + gasto en un turno. Ambos son tools de
+    registro y quedan confirmados → el corto-circuito los junta en una lista.
+    (En el agente REAL, que el modelo emita AMBAS tools depende del modelo — ver
+    scripts/eval_mensajes_complejos.py; este test fija el CÓDIGO, no al modelo.)"""
+    repo = FakeRepo()
+    mixto = LLMResponse(
+        tool_calls=[
+            ToolCall(id="a", nombre="registrar_ingreso", argumentos={"monto": 500, "categoria": "Salario", "fuente": "sueldo"}),
+            ToolCall(id="b", nombre="registrar_gasto", argumentos={"monto": 30, "categoria": "comida", "comercio": "mercado"}),
+        ],
+        stop_reason="tool_use",
+    )
+    llm = ScriptedLLM([mixto])
+    result = await _agente(llm, repo).handle(_contexto(repo, "me pagaron 500 y gasté 30 en el mercado"))
+
+    assert len(llm.llamadas) == 1
+    tipos = sorted((t.tipo if isinstance(t.tipo, str) else t.tipo.value) for t in repo.transactions)
+    assert tipos == ["gasto", "ingreso"]  # AMBOS registrados
+    assert "500" in result.respuesta and "30" in result.respuesta
+
+
+async def test_registro_con_autocorreccion_toma_el_valor_final():
+    """'gasté 20... no, fueron 25': el modelo emite el valor corregido (25). El
+    código simplemente registra lo que el modelo decidió y lo confirma directo."""
+    repo = FakeRepo()
+    llm = ScriptedLLM([_tool("registrar_gasto", {"monto": 25, "categoria": "comida"})])
+    result = await _agente(llm, repo).handle(_contexto(repo, "gasté 20 en el almuerzo, no, fueron 25"))
+
+    assert len(llm.llamadas) == 1
+    assert repo.transactions[0].monto == Decimal("25")
+    assert "25" in result.respuesta and "20" not in result.respuesta
+
+
+# --- confirmación de editar/eliminar consumos e ingresos (sin escalar a ticket) ---
+def _sembrar_tx(repo, tipo="gasto", monto="45", categoria="comida"):
+    user = repo.get_or_create_user("+50370000000", "Ana")
+    return repo.save_transaction(Transaction(
+        user_id=user.id, tipo=tipo, monto=Decimal(monto), categoria=categoria,
+        comercio="Supermaxi" if tipo == "gasto" else "Acme", status="confirmada"))
+
+
+def _status(t):
+    return getattr(t.status, "value", t.status)
+
+
+async def test_editar_gasto_sin_confirmar_no_aplica_ni_escala():
+    """Pedir corregir un gasto NO lo cambia todavía: la tool pide confirmación y
+    NUNCA se crea un ticket por esto."""
+    repo = FakeRepo()
+    tx = _sembrar_tx(repo, "gasto", "45")
+    llm = ScriptedLLM([
+        _tool("editar_transaccion", {"transaction_id": str(tx.id), "monto": 40}),
+        _texto("¿Confirmo que cambio el gasto de $45 a $40?"),
+    ])
+    await _agente(llm, repo).handle(_contexto(repo, "cámbialo a 40"))
+
+    assert repo.transactions[0].monto == Decimal("45")   # intacto: aún no se aplicó
+    assert len(repo.tickets) == 0                          # NO escaló a ticket
+    tool_result = llm.llamadas[1]["messages"][-1]["content"][0]["content"]
+    assert "requiere_confirmacion" in tool_result
+
+
+async def test_editar_ingreso_confirmado_aplica_sin_ticket():
+    repo = FakeRepo()
+    tx = _sembrar_tx(repo, "ingreso", "450", "Salario")
+    llm = ScriptedLLM([
+        _tool("editar_transaccion", {"transaction_id": str(tx.id), "monto": 480, "confirmado": True}),
+        _texto("Listo, lo cambié a $480 ✅"),
+    ])
+    await _agente(llm, repo).handle(_contexto(repo, "sí, confírmalo"))
+
+    assert repo.transactions[0].monto == Decimal("480")   # aplicado tras confirmar
+    assert len(repo.tickets) == 0
+
+
+async def test_eliminar_gasto_sin_confirmar_no_anula_ni_escala():
+    repo = FakeRepo()
+    tx = _sembrar_tx(repo, "gasto", "45")
+    llm = ScriptedLLM([
+        _tool("eliminar_transaccion", {"transaction_id": str(tx.id)}),
+        _texto("¿Borro el gasto de $45 en Supermaxi?"),
+    ])
+    await _agente(llm, repo).handle(_contexto(repo, "borra ese gasto"))
+
+    assert _status(repo.transactions[0]) == "confirmada"   # NO se anuló todavía
+    assert len(repo.tickets) == 0
+    tool_result = llm.llamadas[1]["messages"][-1]["content"][0]["content"]
+    assert "requiere_confirmacion" in tool_result
+
+
+async def test_eliminar_ingreso_confirmado_anula_sin_ticket():
+    repo = FakeRepo()
+    tx = _sembrar_tx(repo, "ingreso", "450", "Salario")
+    llm = ScriptedLLM([
+        _tool("eliminar_transaccion", {"transaction_id": str(tx.id), "confirmado": True}),
+        _texto("Listo, eliminé el ingreso ✅"),
+    ])
+    await _agente(llm, repo).handle(_contexto(repo, "sí, elimínalo"))
+
+    assert _status(repo.transactions[0]) == "anulada"      # anulado tras confirmar
+    assert len(repo.tickets) == 0
+
+
 async def test_gasto_pendiente_no_corto_circuita():
     """Falta el monto → la tool devuelve 'pendiente_confirmacion': se necesita al
     LLM para pedir el dato, así que SÍ hay segundo turno."""

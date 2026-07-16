@@ -40,6 +40,18 @@ Marca sensible=true si el mensaje contiene, sugiere o roza cualquiera de:
 - Cualquier indicio de riesgo legal o reputacional, aunque sea implícito
   o esté mezclado con una consulta normal
 
+## USO NORMAL DEL PRODUCTO — NO es sensible (importante)
+Gestionar los PROPIOS movimientos que el usuario registró es la función central
+del producto y NUNCA es sensible, aunque diga que se equivocó o que algo está
+mal. Marca sensible=false (categoría "gasto" u "otro") cuando el usuario:
+- registra, consulta, CORRIGE/EDITA o ELIMINA/BORRA un gasto o ingreso SUYO:
+  "borra ese gasto", "elimina el ingreso que puse por error", "ese gasto está
+  mal, cámbialo a 20", "ese movimiento no me pertenece, quítalo".
+La distinción clave está en QUIÉN se equivocó: si el usuario corrige o borra SU
+propio registro (él lo anotó mal) → uso normal, NO sensible. Solo es sensible si
+atribuye el error/cobro a la PLATAFORMA o al sistema ("me cobraron de más", "hay
+un cargo que yo no hice", "su app me descontó plata", "me estafaron").
+
 ## SESGO OBLIGATORIO ANTE LA DUDA
 Ante cualquier incertidumbre, clasifica sensible=true y refleja esa duda
 con un valor bajo de confianza. Un falso positivo es aceptable y barato
