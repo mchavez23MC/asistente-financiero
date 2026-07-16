@@ -19,18 +19,18 @@ from uuid import UUID
 from supabase import Client, create_client
 
 from app.domain.models import (
-    Budget,
-    Category,
-    Message,
-    RecurringIncome,
     AuthCode,
     Budget,
     Category,
+    ConversationSummary,
     Message,
+    Recuerdo,
+    RecurringIncome,
     Session,
     Ticket,
     Transaction,
     User,
+    UserFact,
 )
 
 
@@ -107,6 +107,153 @@ class SupabaseRepository:
             .execute()
         )
         return [Message(**row) for row in res.data]
+
+    # --- memoria semántica (Parte A del plan) ---------------------------------
+    def save_message_embedding(
+        self, message_id: UUID, user_id: UUID, embedding: list[float]
+    ) -> None:
+        # upsert por PK (message_id): re-embeber un mensaje reemplaza su vector.
+        self._db.table("message_embeddings").upsert(
+            {
+                "message_id": str(message_id),
+                "user_id": str(user_id),
+                "embedding": embedding,
+            },
+            on_conflict="message_id",
+        ).execute()
+
+    def match_messages(
+        self,
+        user_id: UUID,
+        query_embedding: list[float],
+        match_count: int = 5,
+        umbral: float = 0.75,
+    ) -> list[Recuerdo]:
+        res = self._db.rpc(
+            "match_messages",
+            {
+                "p_user_id": str(user_id),
+                "query_embedding": query_embedding,
+                "match_count": match_count,
+                "umbral": umbral,
+            },
+        ).execute()
+        return [
+            Recuerdo(
+                contenido=row["contenido"],
+                origen="mensaje",
+                rol=row.get("rol"),
+                timestamp=row.get("ts"),
+                similitud=row.get("similitud", 0.0),
+            )
+            for row in (res.data or [])
+        ]
+
+    def match_summaries(
+        self,
+        user_id: UUID,
+        query_embedding: list[float],
+        match_count: int = 3,
+        umbral: float = 0.72,
+    ) -> list[Recuerdo]:
+        res = self._db.rpc(
+            "match_summaries",
+            {
+                "p_user_id": str(user_id),
+                "query_embedding": query_embedding,
+                "match_count": match_count,
+                "umbral": umbral,
+            },
+        ).execute()
+        return [
+            Recuerdo(
+                contenido=row["resumen"],
+                origen="resumen",
+                timestamp=row.get("hasta_ts"),
+                similitud=row.get("similitud", 0.0),
+            )
+            for row in (res.data or [])
+        ]
+
+    def usuarios_activos_desde(self, desde: datetime) -> list[UUID]:
+        res = (
+            self._db.table("messages")
+            .select("user_id")
+            .gte("timestamp", desde.isoformat())
+            .execute()
+        )
+        # Distinct en la app: PostgREST no expone DISTINCT sin una vista dedicada,
+        # y el volumen de una ventana corta es pequeño.
+        return list({UUID(row["user_id"]) for row in (res.data or [])})
+
+    # --- hechos del usuario (memoria de largo plazo) --------------------------
+    def get_user_facts(self, user_id: UUID, limite: int = 10) -> list[UserFact]:
+        res = (
+            self._db.table("user_facts")
+            .select("id,user_id,tipo,contenido,fuente_message_id,updated_at,created_at")
+            .eq("user_id", str(user_id))
+            .order("updated_at", desc=True)
+            .limit(limite)
+            .execute()
+        )
+        return [UserFact(**row) for row in (res.data or [])]
+
+    def match_user_facts(
+        self, user_id: UUID, query_embedding: list[float], match_count: int = 3
+    ) -> list[tuple[UUID, str, float]]:
+        res = self._db.rpc(
+            "match_user_facts",
+            {
+                "p_user_id": str(user_id),
+                "query_embedding": query_embedding,
+                "match_count": match_count,
+            },
+        ).execute()
+        return [
+            (UUID(row["fact_id"]), row["contenido"], row.get("similitud", 0.0))
+            for row in (res.data or [])
+        ]
+
+    def upsert_user_fact(
+        self, fact: UserFact, embedding: Optional[list[float]] = None
+    ) -> UserFact:
+        data = _dump(fact)
+        if embedding is not None:
+            data["embedding"] = embedding
+        if fact.id is not None:
+            data["updated_at"] = datetime.now(timezone.utc).isoformat()
+            res = (
+                self._db.table("user_facts").update(data).eq("id", str(fact.id)).execute()
+            )
+        else:
+            res = self._db.table("user_facts").insert(data).execute()
+        # El select del retorno omite `embedding` (no lo mapea el modelo).
+        fila = {k: v for k, v in res.data[0].items() if k != "embedding"}
+        return UserFact(**fila)
+
+    # --- resúmenes de conversación (memoria episódica) ------------------------
+    def save_conversation_summary(
+        self, summary: ConversationSummary, embedding: Optional[list[float]] = None
+    ) -> ConversationSummary:
+        data = _dump(summary)
+        if embedding is not None:
+            data["embedding"] = embedding
+        res = self._db.table("conversation_summaries").insert(data).execute()
+        fila = {k: v for k, v in res.data[0].items() if k != "embedding"}
+        return ConversationSummary(**fila)
+
+    def get_ultimo_resumen_ts(self, user_id: UUID) -> Optional[datetime]:
+        res = (
+            self._db.table("conversation_summaries")
+            .select("hasta_ts")
+            .eq("user_id", str(user_id))
+            .order("hasta_ts", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not res.data or res.data[0].get("hasta_ts") is None:
+            return None
+        return datetime.fromisoformat(res.data[0]["hasta_ts"])
 
     # --- transacciones (H1) ---------------------------------------------------
     def save_transaction(self, transaction: Transaction) -> Transaction:

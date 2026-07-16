@@ -149,6 +149,60 @@ class Message(BaseModel):
     timestamp: datetime = Field(default_factory=_utcnow)
 
 
+class UserFact(BaseModel):
+    """Hecho estable del usuario (memoria de largo plazo — Parte A del plan).
+
+    Lo que no cabe en la ventana de mensajes recientes pero conviene recordar
+    entre conversaciones: una preferencia ("respuestas cortas"), un hábito
+    ("cobra el 30"), un dato ("su sueldo es 450"). Los extrae un job del
+    scheduler y se deduplican por similitud contra los hechos ya guardados.
+    """
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: Optional[UUID] = None
+    user_id: UUID
+    #: Categoría del hecho: 'preferencia' | 'habito' | 'dato' | 'otro'.
+    tipo: str = "otro"
+    contenido: str
+    fuente_message_id: Optional[UUID] = None
+    updated_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class ConversationSummary(BaseModel):
+    """Resumen de una sesión inactiva (memoria episódica — Parte A del plan).
+
+    Comprime en 2-4 frases lo hablado en una ventana de tiempo. Entra al mismo
+    pool de recuperación semántica que los mensajes, para resolver alusiones a
+    conversaciones pasadas sin recargar cientos de mensajes.
+    """
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: Optional[UUID] = None
+    user_id: UUID
+    resumen: str
+    desde_ts: Optional[datetime] = None
+    hasta_ts: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class Recuerdo(BaseModel):
+    """Un fragmento de memoria recuperado por similitud (DTO, no se persiste).
+
+    Unifica lo que devuelven las búsquedas sobre mensajes y sobre resúmenes,
+    para inyectarlo como un bloque de contexto al agente (§ retrieval híbrido).
+    """
+
+    contenido: str
+    #: De dónde vino: 'mensaje' | 'resumen'.
+    origen: str
+    rol: Optional[str] = None
+    timestamp: Optional[datetime] = None
+    similitud: float = 0.0
+
+
 class Category(BaseModel):
     """Categoría de gasto (catálogo del schema de T2)."""
 
@@ -399,9 +453,17 @@ class AgentContext(BaseModel):
     user: User
     incoming: IncomingMessage
     historial: list[Message] = Field(default_factory=list)
+    # Id del mensaje entrante ya persistido en `messages`, para indexar su vector
+    # en la memoria semántica (Parte A). None en flujos que no lo persisten.
+    mensaje_id: Optional[UUID] = None
     # El modelo decide si el mensaje nuevo completa esta pendiente o abre otra
     # intención (caso frágil de §3.1) — no es una regla rígida.
     transaccion_pendiente: Optional[Transaction] = None
+    # Memoria semántica (Parte A del plan): recuerdos recuperados por similitud
+    # con el mensaje entrante (mensajes viejos fuera de la ventana + resúmenes) y
+    # hechos estables del usuario. Vacíos si la memoria semántica está apagada.
+    memoria_relevante: list[Recuerdo] = Field(default_factory=list)
+    hechos_usuario: list[UserFact] = Field(default_factory=list)
 
 
 class AgentResult(BaseModel):

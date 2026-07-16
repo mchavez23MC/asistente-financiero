@@ -32,6 +32,7 @@ from app.domain.models import (
     Ticket,
     TicketPrioridad,
 )
+from app.application.memoria import MemoriaSemantica
 from app.domain.ports import AgentRegistry, ChannelAdapter, Guardrail, Repository
 
 log = logging.getLogger("e5.orquestador")
@@ -101,6 +102,7 @@ class ProcessMessage:
         channel: ChannelAdapter,
         historial_n: int = 10,
         aviso_espera_umbral_s: float = 2.0,
+        memoria: Optional[MemoriaSemantica] = None,
     ) -> None:
         self._repo = repo
         self._guardrail = guardrail
@@ -109,6 +111,9 @@ class ProcessMessage:
         self._historial_n = historial_n
         # Si el agente tarda más que esto, se manda un aviso de espera al usuario.
         self._aviso_espera_umbral_s = aviso_espera_umbral_s
+        # Memoria semántica (Parte A). None = apagada: el asistente usa solo la
+        # ventana reciente (comportamiento previo a esta feature).
+        self._memoria = memoria
 
     async def __call__(self, incoming: IncomingMessage) -> None:
         """Pipeline completo en una llamada (tests, canales sin webhook)."""
@@ -172,6 +177,7 @@ class ProcessMessage:
             user=user,
             incoming=incoming,
             historial=historial,
+            mensaje_id=mensaje.id,
             transaccion_pendiente=pendiente,
         )
 
@@ -187,6 +193,12 @@ class ProcessMessage:
         ANTES de enviar la respuesta real: así el aviso, si salió, siempre llega
         antes que la respuesta (nunca después)."""
         t0 = time.perf_counter()
+        # Memoria semántica (Parte A): se recupera ANTES de arrancar el agente y
+        # la vigía, para que su latencia no cuente hacia el aviso de espera. Va
+        # aquí (background, tras el 200) y no en preprocess, para no demorar la
+        # respuesta del webhook.
+        if self._memoria is not None:
+            await self._recuperar_memoria(context)
         handler = self._registry.get("principal")  # agente Claude (o 'eco' en tests)
         vigia = asyncio.create_task(self._aviso_si_tarda(context))
         try:
@@ -196,15 +208,40 @@ class ProcessMessage:
             with contextlib.suppress(asyncio.CancelledError):
                 await vigia
         await self._enviar_seguro(context.user, result.respuesta)
-        await self._audit_respuesta(
+        mensaje_asistente = await self._audit_respuesta(
             context.user.id, result.respuesta, result.intencion, result.tool_llamada
         )
+        # Indexar (mensaje del usuario + respuesta) para recuperación futura. Va
+        # después de responder: el usuario ya vio la respuesta; esto solo alimenta
+        # la memoria y nunca la puede tumbar (indexar traga sus propios fallos).
+        if self._memoria is not None:
+            await self._indexar_memoria(context, mensaje_asistente)
         log.info(
             "agente %.0fms tool=%s intención=%s",
             (time.perf_counter() - t0) * 1000,
             result.tool_llamada,
             result.intencion,
         )
+
+    async def _recuperar_memoria(self, context: AgentContext) -> None:
+        """Rellena `context.memoria_relevante` y `context.hechos_usuario` con la
+        recuperación híbrida (§ Parte A). Blindado en MemoriaSemantica: ante
+        fallo deja las listas vacías y el agente responde igual."""
+        recuerdos, hechos = await self._memoria.recordar(
+            context.user.id, context.incoming.contenido_para_audit, context.historial
+        )
+        context.memoria_relevante = recuerdos
+        context.hechos_usuario = hechos
+
+    async def _indexar_memoria(self, context: AgentContext, mensaje_asistente) -> None:
+        if context.mensaje_id is not None:
+            await self._memoria.indexar(
+                context.mensaje_id, context.user.id, context.incoming.contenido_para_audit
+            )
+        if mensaje_asistente is not None and mensaje_asistente.id is not None:
+            await self._memoria.indexar(
+                mensaje_asistente.id, context.user.id, mensaje_asistente.contenido
+            )
 
     async def _aviso_si_tarda(self, context: AgentContext) -> None:
         """Vigía: espera el umbral y, si no la cancelaron antes (el agente aún no
@@ -263,10 +300,11 @@ class ProcessMessage:
         respuesta: str,
         intencion: Intencion,
         tool_llamada: str | None = None,
-    ) -> None:
+    ) -> Message:
         """Escribe la respuesta del asistente con intención y tool (audit trail §7.4).
-        El insert va en un hilo para no bloquear el event loop."""
-        await asyncio.to_thread(
+        El insert va en un hilo para no bloquear el event loop. Devuelve el
+        mensaje guardado (con id) para que la memoria semántica pueda indexarlo."""
+        return await asyncio.to_thread(
             self._repo.save_message,
             Message(
                 user_id=user_id,

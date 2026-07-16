@@ -14,11 +14,16 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from app.application.memoria_jobs import (
+    extraer_hechos_usuario,
+    resumir_conversaciones_inactivas,
+)
 from app.domain.models import Budget, Intencion, Message, RecurringIncome, Rol
-from app.domain.ports import ChannelAdapter, Repository
+from app.domain.ports import ChannelAdapter, EmbeddingProvider, LLMProvider, Repository
 
 
 def periodo_clave(periodo: str, hoy: date | None = None) -> str:
@@ -109,9 +114,20 @@ async def recordar_ingresos_recurrentes(
 
 
 def crear_scheduler(
-    repo: Repository, channel: ChannelAdapter, intervalo_min: int = 30
+    repo: Repository,
+    channel: ChannelAdapter,
+    intervalo_min: int = 30,
+    *,
+    llm: Optional[LLMProvider] = None,
+    embedder: Optional[EmbeddingProvider] = None,
+    memoria_jobs_intervalo_min: int = 360,
+    inactividad_horas: int = 6,
 ) -> AsyncIOScheduler:
-    """Agenda las revisiones periódicas. Arranca con `.start()` en el lifespan."""
+    """Agenda las revisiones periódicas. Arranca con `.start()` en el lifespan.
+
+    Los jobs de memoria de largo plazo (extracción de hechos y resumen de
+    conversaciones, Parte A del plan) solo se agendan si hay `llm` Y `embedder`:
+    sin embedder no hay memoria semántica, así que no tiene sentido correrlos."""
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         revisar_presupuestos,
@@ -129,4 +145,22 @@ def crear_scheduler(
         id="recordar_ingresos_recurrentes",
         replace_existing=True,
     )
+    if llm is not None and embedder is not None:
+        scheduler.add_job(
+            extraer_hechos_usuario,
+            trigger="interval",
+            minutes=memoria_jobs_intervalo_min,
+            args=[repo, llm, embedder],
+            id="extraer_hechos_usuario",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            resumir_conversaciones_inactivas,
+            trigger="interval",
+            minutes=memoria_jobs_intervalo_min,
+            kwargs={"inactividad_horas": inactividad_horas},
+            args=[repo, llm, embedder],
+            id="resumir_conversaciones_inactivas",
+            replace_existing=True,
+        )
     return scheduler
