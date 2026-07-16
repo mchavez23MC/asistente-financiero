@@ -38,6 +38,7 @@ OTP_TTL_MIN = 5
 OTP_MAX_INTENTOS = 5
 REENVIO_COOLDOWN_S = 60
 SESSION_TTL_DIAS = 7
+SESSION_TTL_RECORDAR_DIAS = 30  # "confiar en este dispositivo" en el login
 
 MENSAJE_OTP = (
     "🔐 Tu código para entrar a Luca es *{codigo}*. "
@@ -104,14 +105,18 @@ class AuthService:
             log.exception("No se pudo entregar el OTP por WhatsApp a %s", telefono)
 
     # -------------------------------------------------------------- verificar
-    async def verificar_codigo(self, telefono: str, codigo: str) -> Optional[str]:
+    async def verificar_codigo(
+        self, telefono: str, codigo: str, recordar: bool = False
+    ) -> Optional[str]:
         """Devuelve el token de sesión (en claro, para el cliente) si el código
-        es válido; None si no. El token solo se persiste hasheado."""
+        es válido; None si no. El token solo se persiste hasheado.
+        Con `recordar` la sesión dura SESSION_TTL_RECORDAR_DIAS en vez de
+        SESSION_TTL_DIAS (checkbox "confiar en este dispositivo")."""
         codigo = codigo.strip()
 
         # Código maestro de demo (apagado por defecto; ver docstring del módulo).
         if self._demo_otp and hmac.compare_digest(codigo, self._demo_otp):
-            return self._emitir_sesion(telefono)
+            return self._emitir_sesion(telefono, recordar)
 
         activo = self._repo.get_auth_code_activo(telefono)
         if activo is None or activo.expira_at < _ahora():
@@ -124,17 +129,18 @@ class AuthService:
             return None
 
         self._repo.marcar_codigo_usado(activo.id)  # un solo uso
-        return self._emitir_sesion(telefono)
+        return self._emitir_sesion(telefono, recordar)
 
     # ---------------------------------------------------------------- sesión
-    def _emitir_sesion(self, telefono: str) -> str:
+    def _emitir_sesion(self, telefono: str, recordar: bool = False) -> str:
         user = self._repo.get_or_create_user(telefono)
         token = secrets.token_urlsafe(32)  # 256 bits
+        ttl_dias = SESSION_TTL_RECORDAR_DIAS if recordar else SESSION_TTL_DIAS
         self._repo.create_session(
             Session(
                 token_hash=_hash_token(token),
                 user_id=user.id,
-                expira_at=_ahora() + timedelta(days=SESSION_TTL_DIAS),
+                expira_at=_ahora() + timedelta(days=ttl_dias),
             )
         )
         return token

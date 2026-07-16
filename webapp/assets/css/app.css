@@ -8,6 +8,9 @@
 html, body { margin: 0; padding: 0; }
 body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 img, svg { max-width: 100%; display: block; }
+/* Tamaño base de los íconos de LUCA.icon(): sin esto, un svg sin regla de
+   contexto (p. ej. dentro de .lrow) se expande al ancho del contenedor. */
+.ico { width: 20px; height: 20px; flex-shrink: 0; }
 button { font-family: inherit; cursor: pointer; }
 a { color: var(--luca-navy); text-decoration: none; }
 a:hover { text-decoration: underline; }

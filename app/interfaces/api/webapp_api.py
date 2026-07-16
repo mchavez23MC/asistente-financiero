@@ -68,7 +68,11 @@ async def solicitar_codigo(request: Request) -> JSONResponse:
 async def verificar_codigo(request: Request) -> JSONResponse:
     body = await request.json()
     telefono = _telefono_valido(body.get("telefono", ""))
-    token = await request.app.state.auth.verificar_codigo(telefono, str(body.get("codigo", "")))
+    token = await request.app.state.auth.verificar_codigo(
+        telefono,
+        str(body.get("codigo", "")),
+        recordar=bool(body.get("recordar", False)),
+    )
     if token is None:
         raise HTTPException(status_code=401, detail="Código incorrecto o expirado")
     return JSONResponse({"token": token})
