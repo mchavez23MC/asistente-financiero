@@ -56,6 +56,36 @@ responder el `200 OK` del webhook rápido y hacer el trabajo del LLM en backgrou
      respuesta. La entrega por el canal es resiliente (un 4xx/5xx de Twilio no
      tira el webhook ni genera duplicados).
 
+### Memoria semántica (Parte A del plan de mitigación)
+
+Además de la **ventana reciente** (últimos `HISTORIAL_N` mensajes, memoria por
+*recencia*), el agente recibe memoria recuperada por **similitud**:
+
+- **Mensajes viejos relevantes** — al entrar un mensaje, se embebe y se buscan
+  por coseno los mensajes pasados del mismo usuario (RPC `match_messages`,
+  pgvector), excluyendo los que ya están en la ventana reciente. Resuelve
+  correferencias fuera de la ventana ("lo del carro que te conté").
+- **Hechos del usuario** (`user_facts`) — memoria de largo plazo (preferencias,
+  hábitos, datos recurrentes) que un job del scheduler extrae de las
+  conversaciones y deduplica por similitud.
+- **Resúmenes de conversación** (`conversation_summaries`) — memoria episódica:
+  cuando una sesión queda inactiva, otro job la resume en 2-4 frases; los
+  resúmenes entran al mismo pool de recuperación.
+
+Todo se inyecta como **bloque de sistema dinámico** del agente (no como turnos
+falsos del historial; no rompe el *prompt caching* del prefijo estable). La
+recuperación e indexación corren en `run_agent` (background, tras el 200), así
+que **no** añaden latencia al webhook.
+
+> **Degrada con gracia**: si no hay `VOYAGE_API_KEY`, la memoria semántica queda
+> **apagada** y el asistente usa solo la ventana reciente, igual que antes. Para
+> activarla: crea la key en Voyage AI y corre
+> [`db/migracion-memoria-semantica.sql`](db/migracion-memoria-semantica.sql) en
+> Supabase (habilita `pgvector` + tablas + funciones `match_*`). Un fallo del
+> embedder o de la búsqueda nunca tumba una respuesta (memoria = extra, no
+> requisito). Puertos: `EmbeddingProvider` (adaptador Voyage) y los métodos de
+> memoria del `Repository`.
+
 ### Tools del agente (contrato congelado, `app/domain/tools.py`)
 
 - `registrar_gasto` — crea la transacción de gasto (nace `pendiente_confirmacion`).

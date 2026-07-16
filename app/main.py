@@ -19,12 +19,14 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.adapters.channels.whatsapp_twilio import WhatsAppTwilioAdapter
+from app.adapters.embeddings.voyage import VoyageEmbeddingProvider
 from app.adapters.guardrail.groq_classifier import GroqClassifier
 from app.adapters.guardrail.layered import LayeredGuardrail
 from app.adapters.llm.claude import ClaudeProvider
 from app.adapters.persistence.supabase_repo import SupabaseRepository
 from app.application.agents.principal import MainAgent
 from app.application.agents.soporte_rag import SoporteRAG
+from app.application.memoria import MemoriaSemantica
 from app.application.process_message import ProcessMessage
 from app.application.router import InMemoryAgentRegistry
 from app.infra.config import Settings
@@ -75,6 +77,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     soporte = SoporteRAG(claude)
 
+    # Memoria semántica (Parte A del plan). Opcional: sin VOYAGE_API_KEY no se
+    # instancia el embedder y la memoria queda apagada — el asistente usa solo la
+    # ventana reciente de mensajes, como antes de esta feature.
+    embedder = (
+        VoyageEmbeddingProvider(settings.voyage_api_key, settings.voyage_model)
+        if settings.voyage_api_key
+        else None
+    )
+    memoria = (
+        MemoriaSemantica(
+            repo,
+            embedder,
+            top_k_mensajes=settings.memoria_top_k,
+            umbral=settings.memoria_umbral,
+        )
+        if embedder is not None
+        else None
+    )
+    if memoria is None:
+        log.info("Memoria semántica APAGADA (sin VOYAGE_API_KEY): ventana reciente solamente.")
+
     # Agente principal Claude (fase 4) reemplaza al 'eco'.
     registry = InMemoryAgentRegistry()
     registry.register(MainAgent(llm=claude, repo=repo, soporte=soporte))
@@ -85,9 +108,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         registry=registry,
         channel=channel,
         aviso_espera_umbral_s=settings.aviso_espera_umbral_s,
+        memoria=memoria,
     )
 
-    scheduler = crear_scheduler(repo, channel, settings.scheduler_intervalo_min)
+    scheduler = crear_scheduler(
+        repo,
+        channel,
+        settings.scheduler_intervalo_min,
+        llm=claude if embedder is not None else None,
+        embedder=embedder,
+        memoria_jobs_intervalo_min=settings.memoria_jobs_intervalo_min,
+        inactividad_horas=settings.memoria_inactividad_horas,
+    )
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):

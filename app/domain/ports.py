@@ -17,6 +17,7 @@ Si en fase 2 el repo se vuelve async, es una renegociación explícita del contr
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Protocol, runtime_checkable
 from uuid import UUID
@@ -27,15 +28,18 @@ from app.domain.models import (
     AuthCode,
     Budget,
     Category,
+    ConversationSummary,
     GuardrailResult,
     IncomingMessage,
     LLMResponse,
     Message,
+    Recuerdo,
     RecurringIncome,
     Session,
     Ticket,
     Transaction,
     User,
+    UserFact,
 )
 
 
@@ -74,6 +78,27 @@ class LLMProvider(Protocol):
         system: Optional[str] = None,
     ) -> LLMResponse:
         """Una pasada de completado, con tool use opcional."""
+        ...
+
+
+@runtime_checkable
+class EmbeddingProvider(Protocol):
+    """Convierte texto en vectores para la memoria semántica (Parte A del plan).
+
+    Implementación hoy: `voyage` (Voyage AI, socio de embeddings de Anthropic).
+    Es opcional en el composition root: si no está configurado, la memoria
+    semántica queda apagada y el asistente usa solo la ventana reciente.
+    """
+
+    #: Dimensión de los vectores que emite (debe coincidir con el schema SQL).
+    dimensiones: int
+
+    async def embed(
+        self, textos: list[str], tipo: str = "document"
+    ) -> list[list[float]]:
+        """Vectoriza un lote de textos. `tipo` distingue 'query' (la consulta a
+        buscar) de 'document' (lo que se indexa) — algunos modelos optimizan
+        distinto cada rol. Devuelve un vector por texto, en el mismo orden."""
         ...
 
 
@@ -142,6 +167,69 @@ class Repository(Protocol):
 
     def recent_messages(self, n: int = 100) -> list[Message]:
         """Últimos mensajes de todos los usuarios (audit trail del panel, §7.4)."""
+        ...
+
+    # --- memoria semántica (Parte A del plan) --------------------------------
+    def save_message_embedding(
+        self, message_id: UUID, user_id: UUID, embedding: list[float]
+    ) -> None:
+        """Guarda (o reemplaza) el vector de un mensaje ya persistido."""
+        ...
+
+    def match_messages(
+        self,
+        user_id: UUID,
+        query_embedding: list[float],
+        match_count: int = 5,
+        umbral: float = 0.75,
+    ) -> list[Recuerdo]:
+        """Top-k mensajes del usuario por similitud coseno (RPC match_messages).
+        SIEMPRE filtrado por user_id (§7.3.2)."""
+        ...
+
+    def match_summaries(
+        self,
+        user_id: UUID,
+        query_embedding: list[float],
+        match_count: int = 3,
+        umbral: float = 0.72,
+    ) -> list[Recuerdo]:
+        """Top-k resúmenes de conversación del usuario por similitud."""
+        ...
+
+    def usuarios_activos_desde(self, desde: datetime) -> list[UUID]:
+        """User ids con al menos un mensaje desde `desde` (para los jobs de
+        extracción de hechos y de resumen del scheduler)."""
+        ...
+
+    # --- hechos del usuario (memoria de largo plazo) -------------------------
+    def get_user_facts(self, user_id: UUID, limite: int = 10) -> list[UserFact]:
+        """Hechos estables del usuario, más recientes primero."""
+        ...
+
+    def match_user_facts(
+        self, user_id: UUID, query_embedding: list[float], match_count: int = 3
+    ) -> list[tuple[UUID, str, float]]:
+        """Hechos más parecidos a un candidato (id, contenido, similitud), para
+        deduplicar en la extracción."""
+        ...
+
+    def upsert_user_fact(
+        self, fact: UserFact, embedding: Optional[list[float]] = None
+    ) -> UserFact:
+        """Inserta un hecho nuevo, o actualiza `fact.id` si ya venía resuelto
+        (dedup: el llamador decide si es actualización)."""
+        ...
+
+    # --- resúmenes de conversación (memoria episódica) -----------------------
+    def save_conversation_summary(
+        self, summary: ConversationSummary, embedding: Optional[list[float]] = None
+    ) -> ConversationSummary:
+        ...
+
+    def get_ultimo_resumen_ts(self, user_id: UUID) -> Optional[datetime]:
+        """`hasta_ts` del resumen más reciente del usuario, o None si no hay.
+        Marca hasta dónde ya se resumió (idempotencia del job de resumen)."""
         ...
 
     # --- transacciones (H1: gastos e ingresos) ---

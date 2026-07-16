@@ -28,16 +28,31 @@ from app.application.router import EcoHandler, InMemoryAgentRegistry
 from app.domain.models import (
     AgentResult,
     Budget,
+    ConversationSummary,
     GuardrailResult,
     IncomingMessage,
     Intencion,
     MediaItem,
     Message,
+    Recuerdo,
     Ticket,
     Transaction,
     User,
+    UserFact,
 )
 from app.interfaces.api import webhook
+
+
+def _coseno(a: list[float], b: list[float]) -> float:
+    """Similitud coseno, para que el FakeRepo emule match_* de pgvector."""
+    import math
+
+    if not a or not b:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
 
 
 class StubGuardrail:
@@ -61,6 +76,11 @@ class FakeRepo:
         self.categories: set[str] = set()
         self.recurring_incomes: list = []
         self.income_reminders: set[tuple] = set()
+        # Memoria semántica (Parte A): vectores por mensaje, hechos y resúmenes.
+        self.message_embeddings: dict[UUID, tuple[UUID, list[float]]] = {}
+        self.user_facts: list[UserFact] = []
+        self.fact_embeddings: dict[UUID, list[float]] = {}
+        self.conversation_summaries: list = []
 
     def get_or_create_user(self, telefono: str, nombre: Optional[str] = None) -> User:
         for u in self.users.values():
@@ -91,6 +111,82 @@ class FakeRepo:
 
     def recent_messages(self, n: int = 100) -> list[Message]:
         return list(reversed(self.messages))[:n]
+
+    # --- memoria semántica (Parte A) ---
+    def save_message_embedding(self, message_id, user_id, embedding) -> None:
+        self.message_embeddings[message_id] = (user_id, list(embedding))
+
+    def match_messages(self, user_id, query_embedding, match_count=5, umbral=0.75):
+        puntuados = []
+        for m in self.messages:
+            emb = self.message_embeddings.get(m.id)
+            if emb is None or emb[0] != user_id:
+                continue
+            sim = _coseno(query_embedding, emb[1])
+            if sim >= umbral:
+                rol = m.rol if isinstance(m.rol, str) else m.rol.value
+                puntuados.append(
+                    Recuerdo(contenido=m.contenido, origen="mensaje", rol=rol,
+                             timestamp=m.timestamp, similitud=sim)
+                )
+        puntuados.sort(key=lambda r: r.similitud, reverse=True)
+        return puntuados[:match_count]
+
+    def match_summaries(self, user_id, query_embedding, match_count=3, umbral=0.72):
+        puntuados = []
+        for s, vec in self.conversation_summaries:
+            if s.user_id != user_id:
+                continue
+            sim = _coseno(query_embedding, vec)
+            if sim >= umbral:
+                puntuados.append(
+                    Recuerdo(contenido=s.resumen, origen="resumen",
+                             timestamp=s.hasta_ts, similitud=sim)
+                )
+        puntuados.sort(key=lambda r: r.similitud, reverse=True)
+        return puntuados[:match_count]
+
+    def usuarios_activos_desde(self, desde):
+        return list({m.user_id for m in self.messages if m.timestamp >= desde})
+
+    def get_user_facts(self, user_id, limite=10):
+        propios = [f for f in self.user_facts if f.user_id == user_id]
+        return list(reversed(propios))[:limite]
+
+    def match_user_facts(self, user_id, query_embedding, match_count=3):
+        puntuados = []
+        for f in self.user_facts:
+            vec = self.fact_embeddings.get(f.id)
+            if f.user_id != user_id or vec is None:
+                continue
+            puntuados.append((f.id, f.contenido, _coseno(query_embedding, vec)))
+        puntuados.sort(key=lambda p: p[2], reverse=True)
+        return puntuados[:match_count]
+
+    def upsert_user_fact(self, fact, embedding=None):
+        if fact.id is not None:
+            for i, f in enumerate(self.user_facts):
+                if f.id == fact.id:
+                    saved = f.model_copy(update={"contenido": fact.contenido, "tipo": fact.tipo})
+                    self.user_facts[i] = saved
+                    if embedding is not None:
+                        self.fact_embeddings[saved.id] = embedding
+                    return saved
+        saved = fact.model_copy(update={"id": uuid4()})
+        self.user_facts.append(saved)
+        if embedding is not None:
+            self.fact_embeddings[saved.id] = embedding
+        return saved
+
+    def save_conversation_summary(self, summary, embedding=None):
+        saved = summary.model_copy(update={"id": uuid4()})
+        self.conversation_summaries.append((saved, embedding))
+        return saved
+
+    def get_ultimo_resumen_ts(self, user_id):
+        tss = [s.hasta_ts for s, _ in self.conversation_summaries
+               if s.user_id == user_id and s.hasta_ts is not None]
+        return max(tss) if tss else None
 
     def save_transaction(self, transaction: Transaction) -> Transaction:
         if transaction.id is not None:

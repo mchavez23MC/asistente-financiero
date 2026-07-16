@@ -54,6 +54,14 @@ class Settings:
     aviso_espera_umbral_s: float
     # Código maestro de OTP para demos (vacío = apagado). NUNCA en producción.
     auth_demo_otp: str
+    # Memoria semántica (Parte A). VOYAGE_API_KEY vacío = memoria apagada: el
+    # asistente usa solo la ventana reciente (comportamiento previo).
+    voyage_api_key: str
+    voyage_model: str
+    memoria_top_k: int
+    memoria_umbral: float
+    memoria_jobs_intervalo_min: int
+    memoria_inactividad_horas: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -93,4 +101,10 @@ class Settings:
             scheduler_intervalo_min=int(os.environ.get("SCHEDULER_INTERVALO_MIN", "30")),
             aviso_espera_umbral_s=float(os.environ.get("AVISO_ESPERA_UMBRAL_S", "2.0")),
             auth_demo_otp=os.environ.get("AUTH_DEMO_OTP", ""),
+            voyage_api_key=os.environ.get("VOYAGE_API_KEY", ""),
+            voyage_model=os.environ.get("VOYAGE_MODEL", "voyage-3.5-lite"),
+            memoria_top_k=int(os.environ.get("MEMORIA_TOP_K", "5")),
+            memoria_umbral=float(os.environ.get("MEMORIA_UMBRAL", "0.75")),
+            memoria_jobs_intervalo_min=int(os.environ.get("MEMORIA_JOBS_INTERVALO_MIN", "360")),
+            memoria_inactividad_horas=int(os.environ.get("MEMORIA_INACTIVIDAD_HORAS", "6")),
         )
