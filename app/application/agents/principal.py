@@ -13,13 +13,17 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import date
+from decimal import Decimal, InvalidOperation
+from typing import Optional
 from uuid import UUID
 
 from app.application.agents.gasto import registrar_gasto
 from app.application.agents.ingreso import configurar_ingreso_recurrente, registrar_ingreso
 from app.application.agents.presupuesto import configurar_presupuesto, consultar_presupuesto
 from app.application.agents.soporte_rag import SoporteRAG
+from app.application.memoria import render_memoria
 from app.application.agents.transacciones import (
     consultar_movimientos,
     editar_transaccion,
@@ -307,6 +311,82 @@ _INTENCION_POR_TOOL = {
     "responder_soporte": Intencion.SOPORTE,
 }
 
+# Tools de registro cuyo resultado exitoso se puede confirmar en código, sin una
+# segunda llamada al LLM (§optimización de latencia): la confirmación solo pone
+# en palabras datos que el sistema YA tiene (monto, categoría, total groundeado),
+# así que gastar ~1 inferencia extra solo para redactarla no aporta nada.
+_TOOLS_REGISTRO = {"registrar_gasto", "registrar_ingreso"}
+
+
+def _fmt_monto(valor) -> str:
+    """Monto a texto: '$25' si es entero, '$32.50' si tiene centavos."""
+    try:
+        d = Decimal(str(valor))
+    except (InvalidOperation, TypeError, ValueError):
+        return f"${valor}"
+    return f"${d:.0f}" if d == d.to_integral_value() else f"${d:.2f}"
+
+
+def _confirmacion_directa(resp, salidas: list) -> Optional[str]:
+    """Si el turno consistió SOLO en registro(s) de gasto/ingreso y TODOS quedaron
+    confirmados (sin faltantes, sin posible_duplicado, sin error), arma la
+    confirmación en código y la devuelve, evitando un segundo turno de Claude solo
+    para redactarla. Devuelve None cuando NO aplica —mensajes mixtos (registro +
+    consulta), correcciones, dudas, duplicados o errores necesitan el lenguaje
+    natural del modelo— y entonces el agente sigue con el turno normal del LLM."""
+    calls = resp.tool_calls
+    if not calls or any(tc.nombre not in _TOOLS_REGISTRO for tc in calls):
+        return None
+    registros: list[tuple[str, dict, dict]] = []
+    for tc, salida in zip(calls, salidas):
+        if not isinstance(salida, dict):
+            return None
+        if "error" in salida or salida.get("faltantes") or salida.get("status") != "confirmada":
+            return None
+        registros.append((tc.nombre, tc.argumentos, salida))
+    return _texto_confirmacion(registros) if registros else None
+
+
+def _texto_confirmacion(registros: list) -> str:
+    """Un registro → prosa con el total groundeado si vino; varios → lista vertical
+    (mismo formato de listados que pide el system prompt)."""
+    if len(registros) == 1:
+        nombre, args, salida = registros[0]
+        frase = _frase_registro(nombre, args)
+        total = salida.get("total_categoria_periodo")
+        categoria = args.get("categoria")
+        if total is not None and categoria:
+            return f"{frase} Vas {_fmt_monto(total)} en {categoria} este mes."
+        return frase
+    lineas = "\n".join(f"• {_item_registro(n, a)}" for n, a, _ in registros)
+    return "Listo, anoté tus movimientos 👇\n" + lineas
+
+
+def _frase_registro(nombre: str, args: dict) -> str:
+    monto = _fmt_monto(args.get("monto"))
+    categoria = args.get("categoria")
+    if nombre == "registrar_ingreso":
+        cat = f" ({categoria})" if categoria else ""
+        fuente = args.get("fuente")
+        de = f" de {fuente}" if fuente else ""
+        return f"¡Listo! Registré tu ingreso de {monto}{cat}{de} ✅"
+    en = f" en {categoria}" if categoria else ""
+    comercio = args.get("comercio")
+    donde = f" ({comercio})" if comercio else ""
+    return f"Listo, anoté {monto}{en}{donde} ✅"
+
+
+def _item_registro(nombre: str, args: dict) -> str:
+    monto = _fmt_monto(args.get("monto"))
+    categoria = args.get("categoria")
+    if nombre == "registrar_ingreso":
+        etiqueta = args.get("fuente") or categoria or "ingreso"
+        return f"{monto} — {etiqueta} (ingreso)"
+    etiqueta = args.get("comercio") or categoria or "gasto"
+    extra = f" · {categoria}" if categoria and categoria != etiqueta else ""
+    return f"{monto} — {etiqueta}{extra}"
+
+
 # System prompt como bloque cacheado (prompt caching, §4). El breakpoint sobre el
 # bloque de sistema cachea el prefijo estable ENTERO —tools + system—, que es
 # idéntico en cada request y en cada turno del bucle de tool use. Recorta el TTFT
@@ -348,18 +428,28 @@ _ARGS_TOOL = {
 _DIAS_SEMANA = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
 
-def _system_blocks() -> list[dict]:
-    """System = bloque estable cacheado + bloque dinámico con la fecha de HOY.
-    El breakpoint de caché queda en el bloque estable, así el prefijo (tools +
-    prompt) sigue haciendo hit aunque la fecha cambie cada día."""
+def _system_blocks(context: AgentContext | None = None) -> list[dict]:
+    """System = bloque estable cacheado + bloque(s) dinámico(s). El breakpoint de
+    caché queda en el bloque estable, así el prefijo (tools + prompt) sigue
+    haciendo hit aunque cambien la fecha o la memoria recuperada.
+
+    Bloques dinámicos (no cacheados, cambian por request):
+      - fecha de HOY (fechas relativas).
+      - memoria semántica (Parte A): recuerdos relevantes + hechos del usuario,
+        si el contexto los trae (vacío = memoria apagada o sin resultados)."""
     hoy = date.today()
-    return _SYSTEM_CACHED + [
+    bloques = _SYSTEM_CACHED + [
         {
             "type": "text",
             "text": f"HOY es {_DIAS_SEMANA[hoy.weekday()]} {hoy.isoformat()}. Usa esta "
             "fecha como referencia para 'hoy', 'ayer', 'el lunes', etc.",
         }
     ]
+    if context is not None:
+        memoria = render_memoria(context.memoria_relevante, context.hechos_usuario)
+        if memoria:
+            bloques.append({"type": "text", "text": memoria})
+    return bloques
 
 
 class MainAgent:
@@ -381,11 +471,24 @@ class MainAgent:
         messages = self._build_messages(context)
         intencion = Intencion.OTRO
         ultima_tool: str | None = None
-        system = _system_blocks()
+        system = _system_blocks(context)
 
-        for _ in range(self._max_turns):
+        for turno in range(self._max_turns):
+            t_llm = time.perf_counter()
             resp = await self._llm.complete(
                 messages=messages, tools=TOOLS, system=system
+            )
+            # Telemetría de latencia (§diagnóstico): tiempo y tokens por turno de
+            # Claude. Deja ver cuántas inferencias secuenciales cuesta un mensaje
+            # y si el prompt caching hace hit (cache_read>0).
+            log.info(
+                "claude turno=%d %.0fms in=%s cache_read=%s out=%s tools=%d",
+                turno,
+                (time.perf_counter() - t_llm) * 1000,
+                resp.input_tokens,
+                resp.cache_read_tokens,
+                resp.output_tokens,
+                len(resp.tool_calls),
             )
             if not resp.tool_calls:
                 return AgentResult(
@@ -406,16 +509,29 @@ class MainAgent:
 
             # Ejecutar cada tool y realimentar los resultados.
             resultados: list[dict] = []
+            salidas: list = []
             for tc in resp.tool_calls:
                 ultima_tool = tc.nombre
                 intencion = _INTENCION_POR_TOOL.get(tc.nombre, intencion)
+                t_tool = time.perf_counter()
                 salida = await self._ejecutar(tc.nombre, tc.argumentos, context)
+                log.info("tool=%s %.0fms", tc.nombre, (time.perf_counter() - t_tool) * 1000)
+                salidas.append(salida)
                 resultados.append(
                     {
                         "type": "tool_result",
                         "tool_use_id": tc.id,
                         "content": json.dumps(salida, ensure_ascii=False, default=str),
                     }
+                )
+
+            # Corto-circuito de latencia: si el turno fue solo registro(s) exitoso(s),
+            # se confirma en código y se ahorra un segundo turno de Claude (~1 inferencia).
+            directa = _confirmacion_directa(resp, salidas)
+            if directa is not None:
+                log.info("confirmación directa: sin 2º turno de Claude")
+                return AgentResult(
+                    respuesta=directa, intencion=intencion, tool_llamada=ultima_tool
                 )
             messages.append({"role": "user", "content": resultados})
 
@@ -436,7 +552,7 @@ class MainAgent:
         intencion = Intencion.OTRO
         ultima_tool: str | None = None
         todo = ""  # todo el texto que vio el usuario, para auditar con fidelidad
-        system = _system_blocks()
+        system = _system_blocks(context)
 
         for _ in range(self._max_turns):
             resp = None
@@ -468,10 +584,12 @@ class MainAgent:
             messages.append({"role": "assistant", "content": asistente})
 
             resultados: list[dict] = []
+            salidas: list = []
             for tc in resp.tool_calls:
                 ultima_tool = tc.nombre
                 intencion = _INTENCION_POR_TOOL.get(tc.nombre, intencion)
                 salida = await self._ejecutar(tc.nombre, tc.argumentos, context)
+                salidas.append(salida)
                 resultados.append(
                     {
                         "type": "tool_result",
@@ -479,6 +597,16 @@ class MainAgent:
                         "content": json.dumps(salida, ensure_ascii=False, default=str),
                     }
                 )
+
+            # Corto-circuito de latencia (igual que en `handle`): registro(s) simple(s)
+            # y exitoso(s) → se emite la confirmación armada en código y se corta,
+            # sin gastar un segundo turno de Claude.
+            directa = _confirmacion_directa(resp, salidas)
+            if directa is not None:
+                todo += directa
+                yield directa
+                capture.update(respuesta=todo, intencion=intencion, tool_llamada=ultima_tool)
+                return
             messages.append({"role": "user", "content": resultados})
 
         degradado = "Dame un momento para terminar de procesar tu solicitud. 🙏"

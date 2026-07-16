@@ -307,6 +307,79 @@ async def test_mensaje_con_imagen_arma_bloques_para_claude():
     assert result.tool_llamada == "registrar_gasto"
 
 
+# --- corto-circuito de latencia: confirmación directa sin 2º turno de Claude ------
+async def test_registro_simple_confirma_sin_segundo_turno():
+    """Un gasto exitoso se confirma en código: una sola llamada a Claude (el
+    ScriptedLLM tiene UNA respuesta; un 2º turno reventaría por IndexError)."""
+    repo = FakeRepo()
+    llm = ScriptedLLM([_tool("registrar_gasto", {"monto": 25, "categoria": "comida"})])
+    result = await _agente(llm, repo).handle(_contexto(repo, "gasté 25 en comida"))
+
+    assert len(llm.llamadas) == 1  # NO hubo segundo turno del LLM
+    assert result.intencion == "gasto"
+    assert result.tool_llamada == "registrar_gasto"
+    assert "25" in result.respuesta and "✅" in result.respuesta
+    assert repo.transactions[0].status == "confirmada"
+
+
+async def test_registro_ingreso_confirma_sin_segundo_turno():
+    repo = FakeRepo()
+    llm = ScriptedLLM(
+        [_tool("registrar_ingreso", {"monto": 450, "categoria": "Salario", "fuente": "Acme"})]
+    )
+    result = await _agente(llm, repo).handle(_contexto(repo, "me pagaron 450 de Acme"))
+
+    assert len(llm.llamadas) == 1
+    assert result.intencion == "ingreso"
+    assert "450" in result.respuesta
+
+
+async def test_varios_registros_una_pasada_confirma_en_lista():
+    repo = FakeRepo()
+    doble = LLMResponse(
+        tool_calls=[
+            ToolCall(id="a", nombre="registrar_gasto", argumentos={"monto": 10, "categoria": "transporte", "comercio": "Uber"}),
+            ToolCall(id="b", nombre="registrar_gasto", argumentos={"monto": 5, "categoria": "comida", "comercio": "café"}),
+        ],
+        stop_reason="tool_use",
+    )
+    llm = ScriptedLLM([doble])
+    result = await _agente(llm, repo).handle(_contexto(repo, "gasté 10 en uber y 5 en café"))
+
+    assert len(llm.llamadas) == 1  # sin 2º turno
+    assert "•" in result.respuesta  # lista vertical
+    assert "10" in result.respuesta and "5" in result.respuesta
+    assert len(repo.transactions) == 2
+
+
+async def test_gasto_pendiente_no_corto_circuita():
+    """Falta el monto → la tool devuelve 'pendiente_confirmacion': se necesita al
+    LLM para pedir el dato, así que SÍ hay segundo turno."""
+    repo = FakeRepo()
+    llm = ScriptedLLM(
+        [_tool("registrar_gasto", {"categoria": "comida"}), _texto("¿Cuánto gastaste?")]
+    )
+    result = await _agente(llm, repo).handle(_contexto(repo, "gasté en comida"))
+
+    assert len(llm.llamadas) == 2  # el corto-circuito NO aplicó
+    assert "Cuánto" in result.respuesta
+
+
+async def test_registro_con_error_no_corto_circuita():
+    """Si la tool falla, el error va al LLM (no se plantilla una confirmación falsa)."""
+    repo = _RepoQueFalla()
+    llm = ScriptedLLM(
+        [
+            _tool("registrar_gasto", {"monto": 25, "categoria": "comida"}),
+            _texto("Uy, tuve un problema técnico y no quedó registrado."),
+        ]
+    )
+    result = await _agente(llm, repo).handle(_contexto(repo, "gasté 25"))
+
+    assert len(llm.llamadas) == 2
+    assert "problema" in result.respuesta.lower()
+
+
 async def test_adjunto_no_descargado_se_describe_en_texto():
     from app.domain.models import MediaItem
 
