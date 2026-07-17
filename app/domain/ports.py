@@ -453,6 +453,13 @@ class Repository(Protocol):
         documentos, por eso el insert normal (save_transaction) no las envía."""
         ...
 
+    def movimientos_para_perfil(self, user_id: UUID) -> list[dict]:
+        """Transacciones confirmadas del usuario con las banderas que necesita el
+        perfil financiero (E5): {tipo, monto, fecha, comercio, categoria,
+        respaldada (document_id no nulo), sri (el documento tiene clave SRI)}.
+        SIEMPRE filtrado por user_id (§7.3.2)."""
+        ...
+
     def create_review_task(self, task: "ReviewTask") -> "ReviewTask":
         ...
 

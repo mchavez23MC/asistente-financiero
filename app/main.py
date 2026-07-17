@@ -39,6 +39,7 @@ from app.interfaces.api import (
     legal,
     pages,
     panel,
+    perfil_api,
     web_chat,
     webapp_api,
     webhook_twilio,
@@ -200,6 +201,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(legal.router)
     app.include_router(webapp_api.router)
     app.include_router(documentos_api.router)
+    app.include_router(perfil_api.router)
     # Vistas de la webapp como endpoints con URL limpia (sin .html) — ver
     # app/interfaces/api/pages.py. Solo los assets css/js van como estáticos.
     app.include_router(pages.router)

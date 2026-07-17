@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Mi perfil</title>
+  <link rel="stylesheet" href="/assets/css/tokens.css">
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <style>
+    .medidor { text-align:center; padding:8px 0 4px; }
+    .medidor__arco { position:relative; width:200px; height:110px; margin:0 auto; overflow:hidden; }
+    .medidor__num { font-size:44px; font-weight:800; line-height:1; }
+    .medidor__label { font-size:13px; color:var(--muted,#64748b); }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+    .kpi { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .chip { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--muted-bg,#f1f5f9); }
+    .chip--verde { background:#dcfce7; color:#166534; }
+    .chip--gris { background:#f1f5f9; color:#64748b; }
+    .barra { height:12px; border-radius:999px; background:#e5e7eb; overflow:hidden; }
+    .barra__fill { height:100%; background:linear-gradient(90deg,#F5B301,#16a34a); }
+    .fuente { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border,#eef2f7); font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside id="app-sidebar"></aside>
+    <div class="content">
+      <header id="app-topbar"></header>
+      <main class="page">
+        <h1 class="h2 mb-4">Mi perfil financiero</h1>
+        <p class="muted mb-16">La prueba de que eres sujeto de crédito, hecha con lo que tiene respaldo. <b>Solo cuenta lo verificable.</b></p>
+
+        <div id="perfil-root"><p class="muted">Cargando tu perfil…</p></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/shell.js"></script>
+  <script>
+  (function () {
+    if (!LUCA.requirePhone()) return;
+    var root = document.getElementById('perfil-root');
+    function esc(s){var d=document.createElement('div');d.textContent=(s==null?'':s);return d.innerHTML;}
+    function pct(x){return Math.round((x||0)*100);}
+
+    function construyendo(p) {
+      return '<div class="card">'
+        + '<h2 class="h3 mb-8">Construyendo tu perfil 🌱</h2>'
+        + '<p class="muted mb-12">Aún estás juntando evidencia. Esto es lo que sube tu índice:</p>'
+        + '<ul class="mb-8" style="line-height:1.9">'
+        + '<li>📥 Registra tus <b>ingresos con comprobante</b> (voucher de tu sueldo) varios meses seguidos.</li>'
+        + '<li>🧾 Manda el <b>XML de una factura</b> — es la evidencia que más pesa (validada por el SRI).</li>'
+        + '<li>📄 Sube el <b>estado de cuenta</b> del banco y confírmalo en tu panel.</li>'
+        + '</ul>'
+        + '<div class="barra mb-4"><div class="barra__fill" style="width:' + pct(p.confiabilidad_del_dato.indice_verificacion) + '%"></div></div>'
+        + '<p class="muted">Progreso: ' + pct(p.confiabilidad_del_dato.indice_verificacion) + '% · ' + p.usuario.meses_activo + ' mes(es) de actividad</p>'
+        + '</div>';
+    }
+
+    function fuentesHtml(fs) {
+      if (!fs || !fs.length) return '<p class="muted">Aún sin fuentes de ingreso con respaldo.</p>';
+      return fs.map(function (f) {
+        var ev = f.evidencia === 'factura_sri' ? '🟢 SRI' : '🟢 voucher';
+        return '<div class="fuente"><span>' + esc(f.alias) + ' <span class="chip chip--verde">' + ev + '</span></span>'
+          + '<span>' + f.meses_consecutivos + ' mes(es)</span></div>';
+      }).join('');
+    }
+
+    function activo(p) {
+      var idx = pct(p.confiabilidad_del_dato.indice_verificacion);
+      return ''
+        + '<div class="card mb-16"><div class="medidor">'
+        +   '<div class="medidor__num">' + idx + '<span style="font-size:20px">/100</span></div>'
+        +   '<div class="medidor__label">índice de verificación de tu información</div>'
+        +   '<div class="barra mt-8" style="max-width:320px;margin:12px auto 0"><div class="barra__fill" style="width:' + idx + '%"></div></div>'
+        +   '<p class="muted mt-8" style="max-width:460px;margin:8px auto 0;font-size:13px">Este índice <b>no es un score crediticio</b>: mide cuánta de tu información tiene respaldo. Mejora tus posibilidades, pero la decisión siempre es de la institución.</p>'
+        + '</div></div>'
+        + '<div class="cards">'
+        +   '<div class="card"><div class="muted mb-4">Ingreso mensual (respaldado)</div>'
+        +     '<div class="kpi">$' + (p.ingresos.promedio_mensual).toFixed(2) + '</div>'
+        +     '<div class="chip chip--verde mt-4">Regularidad ' + pct(p.ingresos.regularidad) + '%</div>'
+        +     '<div class="mt-8">' + fuentesHtml(p.ingresos.fuentes) + '</div>'
+        +   '</div>'
+        +   '<div class="card"><div class="muted mb-4">Gasto mensual</div>'
+        +     '<div class="kpi">$' + (p.gastos.promedio_mensual).toFixed(2) + '</div>'
+        +     '<div class="chip mt-4">' + pct(p.gastos.respaldado_pct) + '% con respaldo</div>'
+        +     '<p class="muted mt-8" style="font-size:13px">Top: ' + (p.gastos.categorias_top.join(', ') || '—') + '</p>'
+        +   '</div>'
+        +   '<div class="card"><div class="muted mb-4">Capacidad</div>'
+        +     '<div class="kpi">$' + (p.capacidad.flujo_neto_mensual).toFixed(2) + '</div>'
+        +     '<p class="muted mt-4" style="font-size:13px">flujo neto mensual respaldado</p>'
+        +     (p.capacidad.ratio_gasto_ingreso != null ? '<div class="chip mt-4">Gasto/ingreso ' + pct(p.capacidad.ratio_gasto_ingreso) + '%</div>' : '')
+        +   '</div>'
+        +   '<div class="card"><div class="muted mb-4">Confiabilidad del dato</div>'
+        +     '<div class="kpi">' + p.confiabilidad_del_dato.transacciones_respaldadas + '</div>'
+        +     '<p class="muted mt-4" style="font-size:13px">transacciones con respaldo · ' + p.confiabilidad_del_dato.con_validacion_sri + ' con SRI</p>'
+        +     '<div class="chip mt-4">' + p.confiabilidad_del_dato.antiguedad_del_registro_meses + ' meses de historia</div>'
+        +   '</div>'
+        + '</div>'
+        + '<div class="card mt-16"><h3 class="h3 mb-4">Tu reporte con QR</h3>'
+        +   '<p class="muted">Pronto podrás generar un reporte imprimible con un código QR que una cooperativa puede verificar. (En camino 🔜)</p>'
+        + '</div>';
+    }
+
+    LUCA.api('/api/perfil').then(function (r) { return r.json(); }).then(function (data) {
+      var p = data.perfil;
+      if (!p || p.usuario.meses_activo === 0) {
+        root.innerHTML = '<div class="card"><h2 class="h3 mb-8">Aún no tienes perfil 🌱</h2>'
+          + '<p class="muted">Empieza a registrar tus ingresos y gastos con respaldo (un voucher, una factura) y aquí verás crecer tu índice de verificación.</p></div>';
+        return;
+      }
+      root.innerHTML = (p.estado === 'construyendo') ? construyendo(p) : activo(p);
+    }).catch(function () {
+      root.innerHTML = '<p class="muted">No se pudo cargar tu perfil. Intenta de nuevo.</p>';
+    });
+  })();
+  </script>
+</body>
+</html>

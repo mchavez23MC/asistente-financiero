@@ -495,6 +495,22 @@ CONSULTAR_DOCUMENTOS = {
     #     "total": number|null, "archivo": str|null}], "cuantos": int}
 }
 
+# --- Perfil financiero verificable (plan de documentos, E5) ------------------
+CONSULTAR_PERFIL = {
+    "name": "consultar_perfil",
+    "description": (
+        "Devuelve el resumen del PERFIL FINANCIERO VERIFICABLE del usuario (su "
+        "índice de verificación, ingresos respaldados, regularidad, antigüedad). "
+        "Úsala cuando pregunte por su perfil, su índice, o si 'puede optar a un "
+        "crédito'. NUNCA des estos números de memoria: sácalos siempre de aquí. "
+        "El perfil solo cuenta lo que tiene respaldo; los datos vienen del sistema."
+    ),
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+    # Retorno: {"estado": str, "indice_verificacion": number, "meses_activo": int,
+    #   "ingreso_promedio_respaldado": number, "regularidad_ingresos": number,
+    #   "transacciones_respaldadas": int}
+}
+
 #: Set completo de tools del agente principal (H1 + H2 + H3 como opción C, §1).
 TOOLS: list[dict] = [
     REGISTRAR_GASTO,
@@ -508,6 +524,7 @@ TOOLS: list[dict] = [
     RESPONDER_SOPORTE,
     CREAR_TICKET,
     CONSULTAR_DOCUMENTOS,
+    CONSULTAR_PERFIL,
 ]
 
 #: Nombres válidos, para validación en el dispatcher (fase 2/4).

@@ -33,6 +33,7 @@ _PAGINAS: dict[str, str] = {
     "/app/presupuestos": "app/presupuestos.html",
     "/app/tickets": "app/tickets.html",
     "/app/documentos": "app/documentos.html",
+    "/app/perfil": "app/perfil.html",
     "/legal": "legal.html",
 }
 

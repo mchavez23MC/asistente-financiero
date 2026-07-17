@@ -24,6 +24,7 @@ from app.application.agents.ingreso import configurar_ingreso_recurrente, regist
 from app.application.agents.presupuesto import configurar_presupuesto, consultar_presupuesto
 from app.application.agents.soporte_rag import SoporteRAG
 from app.application.documents.consultas import consultar_documentos
+from app.application.perfil import consultar_perfil
 from app.application.memoria import render_memoria
 from app.application.agents.transacciones import (
     consultar_movimientos,
@@ -232,6 +233,22 @@ Cuándo NO mencionarla:
   tools siguen siendo la vía principal. Si ya se la diste hace poco en
   la conversación, no insistas.
 
+## PERFIL FINANCIERO VERIFICABLE
+El usuario construye un "perfil financiero verificable": la prueba de que
+es sujeto de crédito, hecha con las transacciones que tienen RESPALDO
+(documento). La regla de oro: solo lo respaldado cuenta; lo declarado por
+texto se muestra pero no puntúa. Cada evidencia que manda (un voucher de
+su sueldo, el XML de una factura) sube su índice.
+- Si pregunta por su perfil, su índice, o si puede optar a un crédito,
+  usa consultar_perfil (NUNCA des el número de memoria) y explícalo con
+  calidez, invitándolo a ver el detalle en su panel (/app/perfil).
+- Celebra el progreso con naturalidad cuando una evidencia suma ("ese
+  voucher también sumó a tu perfil 💪").
+- TÉRMINOS: di "índice de verificación de tu información". NUNCA digas
+  "score crediticio", "historial crediticio oficial" ni "estás aprobado
+  para un crédito": tú no das crédito ni lo prometes — la decisión es de
+  la institución. Aclara que el perfil mejora sus posibilidades, no las garantiza.
+
 ## RESPALDOS GUARDADOS
 Todo documento que el usuario te envía queda guardado como respaldo. Si
 pregunta si tienes uno ("¿guardaste la factura de la luz?", "¿qué
@@ -397,6 +414,7 @@ _INTENCION_POR_TOOL = {
     # Consulta de respaldos: se audita como 'otro' (el check de messages no
     # admite intenciones nuevas sin migración).
     "consultar_documentos": Intencion.OTRO,
+    "consultar_perfil": Intencion.OTRO,
 }
 
 # Tools de registro cuyo resultado exitoso se puede confirmar en código, sin una
@@ -511,6 +529,7 @@ _ARGS_TOOL = {
     "configurar_presupuesto": {"categoria", "monto_limite", "periodo", "umbral_alerta"},
     "responder_soporte": {"pregunta"},
     "consultar_documentos": {"desde", "hasta", "tipo", "limite"},
+    "consultar_perfil": set(),
 }
 
 # Días de la semana para el bloque de fecha (fechas relativas: "ayer", "el lunes").
@@ -766,6 +785,8 @@ class MainAgent:
             return self._crear_ticket(uid, argumentos)
         if nombre == "consultar_documentos":
             return consultar_documentos(self._repo, uid, **argumentos)
+        if nombre == "consultar_perfil":
+            return consultar_perfil(self._repo, uid)
         return {"error": f"tool desconocida: {nombre}"}
 
     def _crear_ticket(self, uid: UUID, argumentos: dict) -> dict:

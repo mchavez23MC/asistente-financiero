@@ -644,6 +644,43 @@ class SupabaseRepository:
         res = self._db.table("transactions").insert(filas).execute()
         return [Transaction(**{k: v for k, v in row.items() if k not in ("source", "document_id")}) for row in res.data]
 
+    def movimientos_para_perfil(self, user_id) -> list[dict]:
+        from datetime import date as _date
+        from decimal import Decimal as _Dec
+
+        txs = (
+            self._db.table("transactions")
+            .select("tipo,monto,fecha,comercio,categoria,document_id")
+            .eq("user_id", str(user_id))
+            .eq("status", "confirmada")
+            .execute()
+            .data
+        )
+        docs = (
+            self._db.table("documents")
+            .select("id")
+            .eq("user_id", str(user_id))
+            .not_.is_("clave_acceso", "null")
+            .execute()
+            .data
+        )
+        sri_ids = {d["id"] for d in docs}
+        out = []
+        for t in txs:
+            doc_id = t.get("document_id")
+            out.append(
+                {
+                    "tipo": t["tipo"],
+                    "monto": _Dec(str(t["monto"])) if t.get("monto") is not None else None,
+                    "fecha": _date.fromisoformat(t["fecha"]) if t.get("fecha") else None,
+                    "comercio": t.get("comercio"),
+                    "categoria": t.get("categoria"),
+                    "respaldada": doc_id is not None,
+                    "sri": doc_id in sri_ids,
+                }
+            )
+        return out
+
     def create_review_task(self, task: ReviewTask) -> ReviewTask:
         res = self._db.table("review_tasks").insert(_dump(task)).execute()
         return ReviewTask(**res.data[0])

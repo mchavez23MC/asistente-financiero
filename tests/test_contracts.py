@@ -90,6 +90,7 @@ def test_set_de_tools():
         "responder_soporte",
         "crear_ticket",
         "consultar_documentos",
+        "consultar_perfil",
     }
 
 
