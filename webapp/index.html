@@ -46,7 +46,7 @@
             <label class="field__label" for="code">Código</label>
             <input class="input input-amount" id="code" inputmode="numeric" autocomplete="one-time-code"
                    maxlength="6" placeholder="••••••" style="letter-spacing:8px;text-align:center;font-size:22px">
-            <div class="field__error" id="code-err"></div>
+            <div class="field__error" id="code-err" role="alert" aria-live="assertive"></div>
           </div>
           <label class="check mb-16"><input type="checkbox" id="remember" checked><span>Confiar en este dispositivo por 30 días</span></label>
           <button class="btn btn--primary btn--block" type="submit">Entrar</button>
@@ -126,7 +126,7 @@
       fullPhone = normal.value;
       var btn = document.getElementById('btn-enviar');
       btn.disabled = true; btn.textContent = 'Enviando…';
-      solicitar(full).then(function (r) {
+      solicitar(fullPhone).then(function (r) {
         btn.disabled = false; btn.textContent = 'Enviarme el código';
         if (r.status === 429) {
           return r.json().then(function (d) {
