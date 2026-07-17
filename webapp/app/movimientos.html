@@ -116,6 +116,13 @@
     var pending = LUCA.transactions.filter(function (t) { return t.status === 'PENDING_CONFIRMATION'; });
     var curType = 'EXPENSE', curTxId = null;
 
+    // Binding defensivo: algunos controles del detalle (eliminar/recategorizar)
+    // son acciones de demo cuyo markup se removió en la limpieza de mocks. Sin
+    // esta guarda, un getElementById nulo lanzaba un TypeError que abortaba TODO
+    // el render y dejaba la página en blanco. Ahora, si el elemento no existe,
+    // simplemente no se enlaza y la lista se muestra igual.
+    function on(id, ev, fn) { var el = document.getElementById(id); if (el) el.addEventListener(ev, fn); }
+
     // poblar selects de categoría
     function catOptions() {
       return Object.keys(LUCA.categories).filter(function(c){return c!=='TRANSFER';}).map(function (c) { return '<option value="' + c + '">' + LUCA.categories[c].emoji + ' ' + LUCA.categories[c].name + '</option>'; }).join('');
@@ -181,14 +188,14 @@
     }
     function detailRow(k, v) { return '<div class="row-between" style="padding:10px 0;border-bottom:1px solid var(--luca-border)"><span class="muted t-label">' + k + '</span><span>' + v + '</span></div>'; }
     function closeDetail() { document.getElementById('detail-overlay').classList.remove('is-open'); document.getElementById('detail-drawer').classList.remove('is-open'); }
-    document.getElementById('detail-overlay').addEventListener('click', closeDetail);
+    on('detail-overlay', 'click', closeDetail);
 
-    document.getElementById('d-delete').addEventListener('click', function () { LUCA.openModal('del-overlay'); });
-    document.getElementById('d-recat').addEventListener('click', openCatModal);
-    document.getElementById('d-edit').addEventListener('click', function () { closeDetail(); LUCA.toast('Edición: usa el formulario de Nuevo (demo)', { type: 'info' }); });
+    on('d-delete', 'click', function () { LUCA.openModal('del-overlay'); });
+    on('d-recat', 'click', openCatModal);
+    on('d-edit', 'click', function () { closeDetail(); LUCA.toast('Edición: usa el formulario de Nuevo (demo)', { type: 'info' }); });
 
     // eliminar con deshacer
-    document.getElementById('del-confirm').addEventListener('click', function () {
+    on('del-confirm', 'click', function () {
       LUCA.closeModal('del-overlay'); closeDetail();
       var removed = curTxId;
       confirmed = confirmed.filter(function (t) { return t.id !== removed; });
@@ -203,7 +210,7 @@
       }).join('');
       LUCA.openModal('cat-overlay');
     }
-    document.getElementById('cat-grid').addEventListener('click', function (e) {
+    on('cat-grid', 'click', function (e) {
       var b = e.target.closest('[data-cat]'); if (!b) return;
       var t = LUCA.transactions.find(function (x) { return x.id === curTxId; });
       if (t) { t.category = b.dataset.cat; t.status = 'CORRECTED'; }
@@ -263,7 +270,7 @@
 
     // ---- Nuevo movimiento ----
     document.getElementById('btn-new').addEventListener('click', function () { LUCA.openModal('new-overlay'); });
-    document.getElementById('btn-import').addEventListener('click', function () { LUCA.toast('Importar CSV: wizard de 3 pasos (demo)', { type: 'info' }); });
+    on('btn-import', 'click', function () { LUCA.toast('Importar CSV: wizard de 3 pasos (demo)', { type: 'info' }); });
     document.getElementById('new-type').addEventListener('click', function (e) { var b = e.target.closest('[data-t]'); if (!b) return; this.querySelectorAll('button').forEach(function (x) { x.classList.remove('is-on'); }); b.classList.add('is-on'); curType = b.dataset.t; });
     // Nuevo movimiento: el formulario arma la frase y la registra el MISMO
     // pipeline real que el chat (agente + tools) — una sola fuente de verdad.
