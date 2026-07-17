@@ -86,15 +86,28 @@ class MemoriaSemantica:
         """Calcula y guarda el vector de un mensaje ya persistido (para que sea
         recuperable en el futuro). Pensado para correr en background tras enviar
         la respuesta: no debe bloquear ni romper nada."""
-        if not texto.strip():
+        await self.indexar_lote([(message_id, texto)], user_id)
+
+    async def indexar_lote(
+        self, items: list[tuple[UUID, str]], user_id: UUID
+    ) -> None:
+        """Indexa varios mensajes del mismo usuario en UNA sola llamada de
+        embeddings. Juntar el mensaje del usuario y la respuesta del asistente en
+        un lote reduce las peticiones al proveedor (menos 429 en el free tier de
+        Voyage). `items` = [(message_id, texto), ...]. Corre en background tras
+        responder: tolera cualquier fallo sin romper nada."""
+        pares = [(mid, t) for mid, t in items if t and t.strip()]
+        if not pares:
             return
         try:
-            vecs = await self._embedder.embed([texto], tipo="document")
-            await asyncio.to_thread(
-                self._repo.save_message_embedding, message_id, user_id, vecs[0]
-            )
+            vecs = await self._embedder.embed([t for _, t in pares], tipo="document")
+            for (mid, _), vec in zip(pares, vecs):
+                await asyncio.to_thread(
+                    self._repo.save_message_embedding, mid, user_id, vec
+                )
         except Exception:
-            log.warning("No se pudo indexar el mensaje %s en la memoria", message_id, exc_info=True)
+            ids = ", ".join(str(mid) for mid, _ in pares)
+            log.warning("No se pudo indexar el lote de mensajes (%s) en la memoria", ids, exc_info=True)
 
     # --- internos -------------------------------------------------------------
     async def _solo_hechos(self, user_id: UUID) -> list[UserFact]:

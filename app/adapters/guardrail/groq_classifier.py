@@ -52,6 +52,19 @@ propio registro (él lo anotó mal) → uso normal, NO sensible. Solo es sensibl
 atribuye el error/cobro a la PLATAFORMA o al sistema ("me cobraron de más", "hay
 un cargo que yo no hice", "su app me descontó plata", "me estafaron").
 
+## NO es sensible: problemas técnicos / de datos del propio usuario (soporte)
+Un problema FUNCIONAL con el producto o con los datos del propio usuario es
+soporte, NO un reclamo formal. Marca sensible=false, categoria="soporte" cuando
+reporta que algo no funciona o que su información no está bien, sin acusar de
+fraude ni pedir acciones legales:
+- "no se están registrando mis gastos", "anoté un gasto y no aparece"
+- "mi información está mal / incompleta", "el saldo no me cuadra"
+- "la app no me muestra bien mis movimientos", "creo que hay un error en mis datos"
+Esto debe llegar al asistente para que ofrezca ayuda o conecte con una persona.
+Solo sube a sensible=true si el usuario acusa a la plataforma de cobrarle o
+quitarle plata ("me cobraron de más", "me descontaron", "me estafaron"), pide un
+abogado, una denuncia o una devolución de dinero.
+
 ## NO es sensible: correcciones del propio registro (operación normal)
 Editar, corregir o eliminar un registro que EL PROPIO USUARIO creó al
 anotar sus gastos NO es un reclamo — es parte normal del registro (H1):

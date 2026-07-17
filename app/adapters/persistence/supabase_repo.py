@@ -10,12 +10,14 @@ orquestador corre estas llamadas cortas dentro del background task.
 
 from __future__ import annotations
 
+import functools
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
+import httpx
 from supabase import Client, create_client
 
 from app.domain.models import (
@@ -37,6 +39,29 @@ from app.domain.models import (
 )
 
 
+# Errores transitorios de httpx al reutilizar una conexión keep-alive que el
+# servidor ya cerró: la operación falla en el ENVÍO, sin llegar al servidor, así
+# que reintentar es seguro incluso para escrituras.
+_ERRORES_TRANSITORIOS = (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError)
+
+
+def _con_reintento_red(func, reintentos: int = 2):
+    """Envuelve un callable para reintentar `_ERRORES_TRANSITORIOS` con un
+    pequeño backoff. Tras agotar los reintentos, propaga el último error."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        for intento in range(reintentos + 1):
+            try:
+                return func(*args, **kwargs)
+            except _ERRORES_TRANSITORIOS:
+                if intento == reintentos:
+                    raise
+                time.sleep(0.15 * (intento + 1))
+
+    return wrapper
+
+
 def _dump(model) -> dict:
     """Modelo Pydantic → dict JSON-safe para PostgREST, sin id nulo."""
     data = model.model_dump(mode="json")
@@ -54,7 +79,28 @@ class SupabaseRepository:
 
     def __init__(self, url: str, key: str) -> None:
         self._db: Client = create_client(url, key)
+        self._instalar_reintento_red()
         self._user_cache: dict[str, tuple[float, User]] = {}
+
+    def _instalar_reintento_red(self, reintentos: int = 2) -> None:
+        """Reintenta desconexiones transitorias de PostgREST a nivel de una
+        sola petición HTTP.
+
+        supabase-py mantiene un `httpx.Client` HTTP/2 de larga vida y reutiliza
+        conexiones keep-alive; Supabase cierra las que quedan ociosas, así que
+        el primer uso tras el cierre lanza `RemoteProtocolError('Server
+        disconnected')` (o `ConnectError`/`ReadError`). Antes esto tumbaba el
+        webhook con un 500 —nada lo reintentaba— y Twilio reintentaba el evento
+        (riesgo de duplicados).
+
+        Se envuelve `session.request`, el choke point por el que pasan TODAS las
+        consultas (`base_request_builder.send` → `self.session.request(...)`),
+        de modo que el reintento cubre lecturas Y escrituras sin tocar los ~48
+        `.execute()`. Es seguro para escrituras: estos errores ocurren en el
+        ENVÍO, cuando el request aún no llegó al servidor, así que reintentar no
+        duplica la operación; un reintento inmediato abre una conexión nueva."""
+        session = self._db.postgrest.session  # dispara la init perezosa del cliente
+        session.request = _con_reintento_red(session.request, reintentos)
 
     # --- usuarios -----------------------------------------------------------
     def get_or_create_user(self, telefono: str, nombre: Optional[str] = None) -> User:
@@ -391,6 +437,20 @@ class SupabaseRepository:
     def create_ticket(self, ticket: Ticket) -> Ticket:
         res = self._db.table("tickets").insert(_dump(ticket)).execute()
         return Ticket(**res.data[0])
+
+    def latest_ticket_at(self, user_id: UUID) -> Optional[datetime]:
+        res = (
+            self._db.table("tickets")
+            .select("created_at")
+            .eq("user_id", str(user_id))
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            return None
+        valor = res.data[0]["created_at"]
+        return valor if isinstance(valor, datetime) else datetime.fromisoformat(valor)
 
     # --- panel humano (fase 6) --------------------------------------------------
     def get_user(self, user_id: UUID) -> Optional[User]:

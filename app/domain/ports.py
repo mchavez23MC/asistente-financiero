@@ -307,6 +307,11 @@ class Repository(Protocol):
     def create_ticket(self, ticket: Ticket) -> Ticket:
         ...
 
+    def latest_ticket_at(self, user_id: UUID) -> Optional[datetime]:
+        """Fecha de creación del ticket más reciente del usuario, o None si no
+        tiene ninguno. Alimenta el límite de 1 ticket cada 5 horas (§escalación)."""
+        ...
+
     # --- panel humano (fase 6) ---
     def get_user(self, user_id: UUID) -> Optional[User]:
         ...
