@@ -234,14 +234,15 @@ class ProcessMessage:
         context.hechos_usuario = hechos
 
     async def _indexar_memoria(self, context: AgentContext, mensaje_asistente) -> None:
+        # Mensaje del usuario + respuesta del asistente se indexan en UN solo
+        # lote (una llamada de embeddings) para reducir peticiones a Voyage.
+        items: list[tuple] = []
         if context.mensaje_id is not None:
-            await self._memoria.indexar(
-                context.mensaje_id, context.user.id, context.incoming.contenido_para_audit
-            )
+            items.append((context.mensaje_id, context.incoming.contenido_para_audit))
         if mensaje_asistente is not None and mensaje_asistente.id is not None:
-            await self._memoria.indexar(
-                mensaje_asistente.id, context.user.id, mensaje_asistente.contenido
-            )
+            items.append((mensaje_asistente.id, mensaje_asistente.contenido))
+        if items:
+            await self._memoria.indexar_lote(items, context.user.id)
 
     async def _aviso_si_tarda(self, context: AgentContext) -> None:
         """Vigía: espera el umbral y, si no la cancelaron antes (el agente aún no
