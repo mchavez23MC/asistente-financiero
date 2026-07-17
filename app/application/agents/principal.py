@@ -23,6 +23,7 @@ from app.application.agents.gasto import registrar_gasto
 from app.application.agents.ingreso import configurar_ingreso_recurrente, registrar_ingreso
 from app.application.agents.presupuesto import configurar_presupuesto, consultar_presupuesto
 from app.application.agents.soporte_rag import SoporteRAG
+from app.application.documents.consultas import consultar_documentos
 from app.application.memoria import render_memoria
 from app.application.agents.transacciones import (
     consultar_movimientos,
@@ -84,6 +85,8 @@ conversación— con:
 - Procesar imágenes y documentos que te envíe (recibos, facturas,
   capturas de transferencia, estados de cuenta) — ver la sección de
   IMÁGENES Y DOCUMENTOS
+- Consultar los respaldos/documentos que te ha enviado —"¿qué facturas
+  tengo de junio?"— (tool: consultar_documentos)
 - Resolver dudas de soporte usando la base de conocimiento aprobada
   (tool: responder_soporte) — nunca inventes fuera de esos documentos
 - Escalar a un humano cuando el usuario lo pida explícitamente, cuando
@@ -228,6 +231,13 @@ Cuándo NO mencionarla:
 - No la repitas en cada mensaje ni la uses para evitar responder: tus
   tools siguen siendo la vía principal. Si ya se la diste hace poco en
   la conversación, no insistas.
+
+## RESPALDOS GUARDADOS
+Todo documento que el usuario te envía queda guardado como respaldo. Si
+pregunta si tienes uno ("¿guardaste la factura de la luz?", "¿qué
+respaldos tengo de junio?"), usa consultar_documentos ANTES de responder;
+nunca digas que no tienes algo sin consultar. Los datos vienen del
+sistema: no inventes documentos ni montos.
 
 ## POSIBLES DUPLICADOS
 Si registrar_gasto o registrar_ingreso devuelve "posible_duplicado"
@@ -384,6 +394,9 @@ _INTENCION_POR_TOOL = {
     "consultar_presupuesto": Intencion.PRESUPUESTO,
     "configurar_presupuesto": Intencion.PRESUPUESTO,
     "responder_soporte": Intencion.SOPORTE,
+    # Consulta de respaldos: se audita como 'otro' (el check de messages no
+    # admite intenciones nuevas sin migración).
+    "consultar_documentos": Intencion.OTRO,
 }
 
 # Tools de registro cuyo resultado exitoso se puede confirmar en código, sin una
@@ -497,6 +510,7 @@ _ARGS_TOOL = {
     "consultar_presupuesto": {"periodo", "categoria"},
     "configurar_presupuesto": {"categoria", "monto_limite", "periodo", "umbral_alerta"},
     "responder_soporte": {"pregunta"},
+    "consultar_documentos": {"desde", "hasta", "tipo", "limite"},
 }
 
 # Días de la semana para el bloque de fecha (fechas relativas: "ayer", "el lunes").
@@ -750,6 +764,8 @@ class MainAgent:
             return await self._soporte.responder(argumentos.get("pregunta", ""))
         if nombre == "crear_ticket":
             return self._crear_ticket(uid, argumentos)
+        if nombre == "consultar_documentos":
+            return consultar_documentos(self._repo, uid, **argumentos)
         return {"error": f"tool desconocida: {nombre}"}
 
     def _crear_ticket(self, uid: UUID, argumentos: dict) -> dict:

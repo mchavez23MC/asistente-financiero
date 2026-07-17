@@ -414,6 +414,19 @@ class Repository(Protocol):
         """Documentos recibidos por el usuario desde `desde` (rate limit diario)."""
         ...
 
+    def list_documents(
+        self,
+        user_id: UUID,
+        desde: Optional[str] = None,
+        hasta: Optional[str] = None,
+        tipo: Optional[str] = None,
+        limite: int = 10,
+    ) -> list["Document"]:
+        """Respaldos del usuario, más recientes primero, filtrables por rango de
+        fecha de recepción (YYYY-MM-DD) y tipo. Grounded: el sistema lista, Luca
+        explica (consultar_documentos)."""
+        ...
+
 
 class DocumentStorage(Protocol):
     """Almacén de originales (plan de documentos). El core no sabe que es

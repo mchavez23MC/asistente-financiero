@@ -599,6 +599,25 @@ class SupabaseRepository:
         )
         return res.count or 0
 
+    def list_documents(
+        self, user_id, desde=None, hasta=None, tipo=None, limite=10
+    ) -> list[Document]:
+        q = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .order("created_at", desc=True)
+            .limit(limite)
+        )
+        if desde:
+            q = q.gte("created_at", desde)
+        if hasta:
+            q = q.lte("created_at", f"{hasta}T23:59:59")
+        if tipo:
+            q = q.eq("tipo_documento", tipo)
+        res = q.execute()
+        return [Document(**row) for row in res.data]
+
 
 def _inicio_periodo(periodo: str):
     """Primer día del periodo corriente ('semanal' | 'mensual' | 'anual')."""
