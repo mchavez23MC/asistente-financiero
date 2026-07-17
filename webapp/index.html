@@ -22,10 +22,13 @@
           <div class="field">
             <label class="field__label" for="phone">Teléfono (el mismo de tu WhatsApp)</label>
             <div class="input-group">
-              <span class="input-group__prefix">🇪🇨 +593</span>
-              <input class="input" id="phone" type="tel" inputmode="numeric" placeholder="98 765 1234" autocomplete="tel">
+              <span class="input-group__prefix" style="white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:6px">
+                <svg width="18" height="12" viewBox="0 0 18 12" aria-hidden="true" style="border-radius:2px">
+                  <rect width="18" height="6" fill="#ffd400"/><rect y="6" width="18" height="3" fill="#0052a5"/><rect y="9" width="18" height="3" fill="#d21034"/>
+                </svg>+593</span>
+              <input class="input" id="phone" type="tel" inputmode="numeric" placeholder="098 765 4321" autocomplete="tel" autofocus>
             </div>
-            <div class="field__error" id="phone-err"></div>
+            <div class="field__error" id="phone-err" role="alert" aria-live="assertive"></div>
           </div>
           <button class="btn btn--primary btn--block" type="submit" id="btn-enviar">Enviarme el código</button>
           <p class="muted t-micro mt-8">Te llega un código de un solo uso por WhatsApp.
@@ -67,6 +70,19 @@
     var stepPhone = document.getElementById('step-phone');
     var stepCode = document.getElementById('step-code');
 
+    // Normalización EC estricta (espejo del backend): acepta 0987654321,
+    // 987654321, +593…, 593…, 00593…; exige 9 dígitos empezando en 9. Un número
+    // de otro país nunca sale de este formulario. Errores por causa (no genéricos).
+    function normalizarEC(raw) {
+      var d = (raw || '').replace(/\D/g, '');
+      if (!d) return { ok: false, msg: 'Escribe tu número de celular.' };
+      d = d.replace(/^00593/, '').replace(/^593/, '').replace(/^0/, '');
+      if (d.length < 9) return { ok: false, msg: 'Te faltan dígitos: un celular tiene 9 después del +593.' };
+      if (d.length > 9) return { ok: false, msg: 'Son demasiados dígitos para un celular ecuatoriano.' };
+      if (d[0] !== '9') return { ok: false, msg: 'Un celular ecuatoriano empieza con 9 (ej. 098…).' };
+      return { ok: true, value: '+593' + d };
+    }
+
     function err(fieldId, errId, msg) {
       var f = document.getElementById(fieldId);
       f.closest('.field').classList.add('is-error'); f.classList.add('is-error');
@@ -104,14 +120,10 @@
     stepPhone.addEventListener('submit', function (e) {
       e.preventDefault();
       var phone = document.getElementById('phone');
-      var digits = phone.value.replace(/\D/g, '');
-      var full = phone.value.trim().startsWith('+') ? '+' + digits
-               : '+593' + digits.replace(/^0/, '');
-      if (!/^\+[1-9]\d{7,14}$/.test(full)) {
-        err('phone', 'phone-err', 'Ingresa un número válido'); return;
-      }
+      var normal = normalizarEC(phone.value);
+      if (!normal.ok) { err('phone', 'phone-err', normal.msg); return; }
       clearErr('phone', 'phone-err');
-      fullPhone = full;
+      fullPhone = normal.value;
       var btn = document.getElementById('btn-enviar');
       btn.disabled = true; btn.textContent = 'Enviando…';
       solicitar(full).then(function (r) {

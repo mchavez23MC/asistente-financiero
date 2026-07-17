@@ -48,6 +48,16 @@ from app.interfaces.api import (
 log = logging.getLogger("e5")
 
 
+def _parece_produccion(public_base_url: str) -> bool:
+    """Heurística: una URL pública que no es local/túnel de dev se trata como
+    producción para el guard del OTP de demo. Vacío o localhost/ngrok = dev."""
+    url = (public_base_url or "").lower()
+    if not url:
+        return False
+    dev = ("localhost", "127.0.0.1", "ngrok", "trycloudflare", "loca.lt")
+    return not any(marca in url for marca in dev)
+
+
 def _configurar_logging() -> None:
     """La telemetría de latencia (§plan-latencia C1) sale por el logger 'e5' en
     nivel INFO. Uvicorn deja el root en WARNING, así que se le da un handler
@@ -65,6 +75,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _configurar_logging()
     if settings is None:
         settings = Settings.from_env()
+
+    # Guard de seguridad (plan-paginas S4): el código maestro de demo (AUTH_DEMO_OTP)
+    # es un OTP universal — jamás debe quedar encendido en producción. Si está
+    # seteado Y la URL pública parece producción, se aborta el arranque con un
+    # mensaje claro (mismo criterio que una clave faltante).
+    if settings.auth_demo_otp and _parece_produccion(settings.public_base_url):
+        raise RuntimeError(
+            "AUTH_DEMO_OTP está configurado con PUBLIC_BASE_URL de producción. "
+            "El código maestro de demo NO puede correr en producción: quítalo del "
+            "entorno (AUTH_DEMO_OTP vacío) antes de desplegar."
+        )
 
     # --- adaptadores concretos -------------------------------------------------
     # Canal activo: Twilio. (El adaptador de Meta se conserva en

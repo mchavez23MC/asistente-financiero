@@ -23,16 +23,37 @@ from fastapi.responses import JSONResponse
 from app.adapters.channels.web_chat import WebChatCapturingChannel
 from app.application.auth import CooldownActivo
 from app.application.process_message import ProcessMessage
-from app.domain.models import E164_PATTERN, Budget, User
+from app.domain.models import Budget, User
 
 router = APIRouter(prefix="/api")
 
 
+def _normalizar_ec(raw: str) -> str | None:
+    """Normaliza con generosidad a un celular ecuatoriano, o None si no lo es.
+    Acepta 0987654321, 987654321, +593987654321, 593…, 00593…; ignora espacios
+    y guiones. La defensa REAL vive aquí (nunca se confía en el front): un
+    número de otro país no puede salir de este formulario (evita el SMS pumping
+    a números premium extranjeros — brecha S1). v1 = solo Ecuador, solo celular."""
+    digitos = re.sub(r"\D", "", raw or "")
+    for prefijo in ("00593", "593"):
+        if digitos.startswith(prefijo):
+            digitos = digitos[len(prefijo):]
+            break
+    digitos = re.sub(r"^0", "", digitos)  # 0 inicial del formato local
+    # Celular EC: 9 dígitos empezando en 9 (los fijos no tienen WhatsApp).
+    if re.fullmatch(r"9\d{8}", digitos):
+        return "+593" + digitos
+    return None
+
+
 def _telefono_valido(telefono: str) -> str:
-    telefono = (telefono or "").strip().replace(" ", "")
-    if not re.match(E164_PATTERN, telefono):
-        raise HTTPException(status_code=422, detail="Teléfono inválido (formato E.164, ej. +593987651234)")
-    return telefono
+    normalizado = _normalizar_ec(telefono)
+    if normalizado is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Necesito un celular ecuatoriano válido: 9 dígitos que empiezan en 9 (ej. 0987654321).",
+        )
+    return normalizado
 
 
 def _bearer(request: Request) -> str:
