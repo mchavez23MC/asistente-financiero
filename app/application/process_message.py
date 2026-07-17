@@ -184,6 +184,17 @@ class ProcessMessage:
             self._repo.save_message,
             Message(user_id=user.id, rol=Rol.USUARIO, contenido=contenido),
         )
+        # --- pausa de IA: atención humana (panel) -----------------------------
+        # Si el usuario tiene un ticket 'en_proceso', un agente humano tomó la
+        # conversación desde el panel: la IA NO responde (el humano lee el
+        # mensaje y contesta él). El mensaje YA quedó guardado (audit intacto);
+        # solo se omite todo lo automático (docs, escalación, agente). Sin
+        # tickets 'en_proceso' → comportamiento idéntico al actual. La IA se
+        # reactiva sola cuando el panel cierra el ticket (deja de haber
+        # 'en_proceso').
+        if await self._en_atencion_humana(user.id):
+            log.info("usuario %s en atención humana: IA en pausa", user.id)
+            return None
         # --- documentos (E1): respuesta de letra al menú A–E ------------------
         # Va ANTES de la escalación (riesgo R3): una letra es un dispatch
         # determinista, no "contenido" — no debe disparar escalación ni verse
@@ -279,6 +290,13 @@ class ProcessMessage:
             result.tool_llamada,
             result.intencion,
         )
+
+    async def _en_atencion_humana(self, user_id) -> bool:
+        """True si el usuario tiene algún ticket 'en_proceso' — un agente humano
+        lo tomó desde el panel. Reusa `list_tickets` (sin puerto nuevo): son
+        pocos tickets en proceso, el filtro por usuario es trivial."""
+        tickets = await asyncio.to_thread(self._repo.list_tickets, "en_proceso")
+        return any(t.user_id == user_id for t in tickets)
 
     async def _recuperar_memoria(self, context: AgentContext) -> None:
         """Rellena `context.memoria_relevante` y `context.hechos_usuario` con la

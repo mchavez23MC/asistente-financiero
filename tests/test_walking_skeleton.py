@@ -410,6 +410,29 @@ async def test_usuario_nuevo_recibe_aviso_legal_y_queda_con_consentimiento():
     assert repo.messages[-1].intencion == "consentimiento"
 
 
+async def test_ia_en_pausa_si_usuario_tiene_ticket_en_proceso():
+    """Handoff: con un ticket 'en_proceso', el agente NO corre (lo atiende un
+    humano). El mensaje del usuario SÍ se guarda (audit), pero no hay respuesta
+    de la IA. Al cerrar el ticket, la IA vuelve a responder."""
+    from app.domain.models import Ticket
+
+    process, repo, channel = _pipeline()
+    await process(_msg("hola"))  # consentimiento
+    user = next(iter(repo.users.values()))
+    ticket = repo.create_ticket(Ticket(user_id=user.id, motivo="otro", contexto="x", estado="en_proceso"))
+
+    channel.enviados.clear()
+    await process(_msg("¿me ayudas con esto?"))
+    # La IA no respondió; el mensaje del usuario quedó guardado (audit intacto).
+    assert channel.enviados == []
+    assert repo.messages[-1].rol == "user" and repo.messages[-1].contenido == "¿me ayudas con esto?"
+
+    # Cerrado el ticket → la IA retoma.
+    repo.update_ticket_estado(ticket.id, "resuelto")
+    await process(_msg("gasté 25"))
+    assert channel.enviados[-1] == ("+50370000000", "Eco: gasté 25")
+
+
 async def test_segundo_mensaje_pasa_por_eco_y_queda_auditado():
     process, repo, channel = _pipeline()
     await process(_msg("hola"))
