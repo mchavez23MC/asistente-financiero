@@ -37,6 +37,7 @@ from app.domain.models import (
     TipoDocumento,
     User,
 )
+from app.application.documents.factura_xml import FacturaXML, parsear_factura_sri
 from app.domain.ports import ChannelAdapter, DocumentStorage, Repository
 
 log = logging.getLogger("e5.documentos")
@@ -61,6 +62,10 @@ RESPUESTA_XML_TABULAR = (
     "Recibí tu archivo y lo guardé de respaldo 📁 El procesamiento automático "
     "de este tipo de archivo llega prontito; mientras tanto, si me dices qué "
     "registrar, lo anoto de una."
+)
+RESPUESTA_FACTURA_DUPLICADA = (
+    "Esa factura ya la tengo registrada ✅ (la reconocí por su clave de acceso "
+    "del SRI). No la dupliqué; si necesitas algo de ella, dímelo."
 )
 
 #: Respuesta al menú: una letra a–e, con o sin paréntesis/punto.
@@ -177,8 +182,12 @@ class DocumentIngest:
             ),
         )
 
-        if item.es_xml or item.es_tabular:
-            # Sus pipelines de script llegan en E2/E3; por ahora, respaldo.
+        if item.es_xml:
+            # E2: factura electrónica del SRI → parseo por script (cero tokens).
+            return await self._procesar_factura_xml(context, doc, contenido)
+
+        if item.es_tabular:
+            # Su pipeline (estado de cuenta) llega en E3; por ahora, respaldo.
             await asyncio.to_thread(
                 self._repo.update_document,
                 user.id,
@@ -202,6 +211,63 @@ class DocumentIngest:
         )
         await self._responder(user, MENU_CLASIFICACION)
         return True
+
+    async def _procesar_factura_xml(
+        self, context: AgentContext, doc: Document, contenido: bytes
+    ) -> bool:
+        """E2: XML del SRI → extracción por script + propuesta de registro.
+        Devuelve False reescribiendo `context.incoming` con la extracción como
+        texto, para que el AGENTE proponga el registro y maneje el 'sí' con sus
+        tools normales (misma mecánica que la letra del menú). Un XML que no es
+        un comprobante legible cae a respaldo (True)."""
+        user = context.user
+        factura = parsear_factura_sri(contenido)
+        if factura is None:
+            await asyncio.to_thread(
+                self._repo.update_document,
+                user.id,
+                doc.id,
+                {"tipo_documento": TipoDocumento.OTRO_RESPALDO.value, "status": DocumentStatus.CONFIRMADO.value},
+            )
+            await self._responder(user, RESPUESTA_XML_TABULAR)
+            return True
+
+        # Dedupe por clave de acceso: la misma factura pudo llegar antes como
+        # PDF o XML (distinto sha, misma clave). No re-registrar.
+        previo = await asyncio.to_thread(
+            self._repo.find_document_by_clave, user.id, factura.clave_acceso
+        )
+        if previo is not None and previo.id != doc.id:
+            await asyncio.to_thread(
+                self._repo.update_document,
+                user.id,
+                doc.id,
+                {"status": DocumentStatus.DESCARTADO.value},
+            )
+            await self._responder(user, RESPUESTA_FACTURA_DUPLICADA)
+            return True
+
+        await asyncio.to_thread(
+            self._repo.update_document,
+            user.id,
+            doc.id,
+            {
+                "tipo_documento": TipoDocumento.FACTURA_SRI.value,
+                "status": DocumentStatus.EXTRAIDO.value,
+                "metodo_extraccion": "xml_parser",
+                "clave_acceso": factura.clave_acceso,
+                "emisor_ruc": factura.emisor_ruc or None,
+                "emisor_nombre": factura.emisor_nombre or None,
+                "fecha_emision": factura.fecha_emision.isoformat() if factura.fecha_emision else None,
+                "total": str(factura.total) if factura.total is not None else None,
+            },
+        )
+        # Reinyección al agente: los datos verificados viajan como texto (el XML
+        # no es visible por el modelo) y el agente propone el registro.
+        context.incoming = context.incoming.model_copy(
+            update={"texto": _contexto_factura(factura), "media": []}
+        )
+        return False
 
     # ------------------------------------------------- respuesta de letra (menú)
     async def atender_letra(
@@ -259,6 +325,27 @@ class DocumentIngest:
                 intencion=Intencion.OTRO,
             ),
         )
+
+
+def _contexto_factura(f: FacturaXML) -> str:
+    """Texto que ve el agente tras extraer el XML: datos verificados + la orden
+    de proponer registro SIN asumir la dirección del dinero."""
+    fecha = f.fecha_emision.isoformat() if f.fecha_emision else "sin fecha"
+    total = f"${f.total}" if f.total is not None else "monto no leído"
+    validez = (
+        "clave de acceso VÁLIDA (verificada con módulo 11)"
+        if f.clave_valida
+        else "clave de acceso que NO pasó la validación — avísale y no registres sin confirmar"
+    )
+    return (
+        f"[El usuario reenvió el XML de una {f.tipo} electrónica del SRI. "
+        f"Datos extraídos por el sistema ({validez}): emisor {f.emisor_nombre or 'desconocido'} "
+        f"(RUC {f.emisor_ruc or 'N/D'}), fecha {fecha}, total {total}. "
+        "Propón registrarla con estos datos, pero NO asumas la dirección del "
+        "dinero: pregúntale si es una compra suya (gasto) o algo que él emitió "
+        "por una venta o cobro (ingreso). Registra solo cuando la dirección esté "
+        "clara y el usuario confirme.]"
+    )
 
 
 def _extension(item: MediaItem) -> str:

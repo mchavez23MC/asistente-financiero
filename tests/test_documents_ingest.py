@@ -45,6 +45,16 @@ class FakeRepo:
             None,
         )
 
+    def find_document_by_clave(self, user_id, clave_acceso):
+        return next(
+            (
+                d
+                for d in self.documents.values()
+                if d.user_id == user_id and d.clave_acceso == clave_acceso
+            ),
+            None,
+        )
+
     def find_document_esperando(self, user_id):
         candidatos = [
             d
@@ -265,12 +275,9 @@ async def test_texto_normal_no_es_letra():
     assert await ingest.atender_letra(user, incoming) is None
 
 
-# --- XML/CSV: guardados como respaldo (pipelines de script llegan en E2/E3) --
-async def test_xml_se_guarda_como_respaldo():
-    repo, channel = FakeRepo(), FakeChannel()
-    ingest = _ingest(repo=repo, channel=channel)
-    user = _user()
-    ctx = AgentContext(
+# --- XML factura SRI (E2): parseo por script + propuesta de registro ---------
+def _ctx_xml(user: User, contenido: bytes) -> AgentContext:
+    return AgentContext(
         user=user,
         incoming=IncomingMessage(
             canal="whatsapp",
@@ -280,7 +287,7 @@ async def test_xml_se_guarda_como_respaldo():
                 MediaItem(
                     content_type="text/xml",
                     url="https://x",
-                    data_base64=base64.b64encode(b"<factura/>").decode(),
+                    data_base64=base64.b64encode(contenido).decode(),
                     filename="factura.xml",
                 )
             ],
@@ -288,7 +295,67 @@ async def test_xml_se_guarda_como_respaldo():
         historial=[],
     )
 
+
+def _factura_xml(clave: str, relleno: str = "") -> bytes:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f"<factura id='comprobante'>{relleno}"
+        "<infoTributaria>"
+        "<razonSocial>SUPERMAXI</razonSocial><ruc>1790016919001</ruc>"
+        f"<claveAcceso>{clave}</claveAcceso>"
+        "</infoTributaria>"
+        "<infoFactura><fechaEmision>10/07/2026</fechaEmision>"
+        "<importeTotal>32.50</importeTotal></infoFactura>"
+        "</factura>"
+    ).encode()
+
+
+async def test_factura_xml_se_extrae_y_reinyecta_al_agente():
+    from tests.test_sri import _clave
+
+    repo, channel = FakeRepo(), FakeChannel()
+    ingest = _ingest(repo=repo, channel=channel)
+    user = _user()
+    clave = _clave()
+    ctx = _ctx_xml(user, _factura_xml(clave))
+
     atendido = await ingest.atender_media(ctx)
+
+    # False = el agente corre después, con el mensaje reescrito.
+    assert atendido is False
+    assert channel.enviados == []
+    assert ctx.incoming.media == []  # el XML no viaja al modelo
+    assert "factura" in ctx.incoming.texto.lower()
+    assert "32.50" in ctx.incoming.texto
+    assert "NO asumas la dirección" in ctx.incoming.texto
+    doc = next(iter(repo.documents.values()))
+    assert doc.tipo_documento == "factura_sri"
+    assert doc.clave_acceso == clave
+    assert doc.metodo_extraccion == "xml_parser"
+
+
+async def test_misma_factura_por_clave_no_se_duplica():
+    from tests.test_sri import _clave
+
+    repo, channel = FakeRepo(), FakeChannel()
+    ingest = _ingest(repo=repo, channel=channel)
+    user = _user()
+    clave = _clave()
+
+    await ingest.atender_media(_ctx_xml(user, _factura_xml(clave)))
+    # Segundo envío: mismo comprobante, bytes distintos (otro sha) → misma clave.
+    atendido = await ingest.atender_media(_ctx_xml(user, _factura_xml(clave, relleno=" ")))
+
+    assert atendido is True
+    assert "ya la tengo" in channel.enviados[-1].lower()
+
+
+async def test_xml_no_sri_se_guarda_como_respaldo():
+    repo, channel = FakeRepo(), FakeChannel()
+    ingest = _ingest(repo=repo, channel=channel)
+    user = _user()
+
+    atendido = await ingest.atender_media(_ctx_xml(user, b"<factura/>"))
 
     assert atendido is True
     doc = next(iter(repo.documents.values()))

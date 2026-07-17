@@ -388,6 +388,13 @@ class Repository(Protocol):
         """Dedupe por hash del archivo original (unique user_id+sha256)."""
         ...
 
+    def find_document_by_clave(
+        self, user_id: UUID, clave_acceso: str
+    ) -> Optional["Document"]:
+        """Dedupe por clave de acceso del SRI (la misma factura reenviada como
+        XML y luego como PDF tiene distinto sha pero la misma clave)."""
+        ...
+
     def find_document_esperando(self, user_id: UUID) -> Optional["Document"]:
         """El documento más reciente en status='esperando_clasificacion' del
         usuario (para resolver la respuesta de letra del menú)."""

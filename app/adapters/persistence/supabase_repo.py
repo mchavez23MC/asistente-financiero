@@ -552,6 +552,19 @@ class SupabaseRepository:
         )
         return Document(**res.data[0]) if res.data else None
 
+    def find_document_by_clave(
+        self, user_id: UUID, clave_acceso: str
+    ) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("clave_acceso", clave_acceso)
+            .limit(1)
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
     def find_document_esperando(self, user_id: UUID) -> Optional[Document]:
         res = (
             self._db.table("documents")
