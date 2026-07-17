@@ -24,7 +24,9 @@ from app.adapters.guardrail.groq_classifier import GroqClassifier
 from app.adapters.guardrail.layered import LayeredGuardrail
 from app.adapters.llm.claude import ClaudeProvider
 from app.adapters.persistence.supabase_repo import SupabaseRepository
+from app.adapters.storage.supabase_storage import SupabaseDocumentStorage
 from app.application.agents.principal import MainAgent
+from app.application.documents.ingest import DocumentIngest
 from app.application.agents.soporte_rag import SoporteRAG
 from app.application.memoria import MemoriaSemantica
 from app.application.process_message import ProcessMessage
@@ -63,6 +65,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         account_sid=settings.twilio_account_sid,
         auth_token=settings.twilio_auth_token,
         whatsapp_from=settings.twilio_whatsapp_from,
+        # Con documentos activos también se descargan XML/CSV/XLSX (R4).
+        descargar_extendido=settings.docs_habilitado,
     )
     repo = SupabaseRepository(settings.supabase_url, settings.supabase_key)
     guardrail = LayeredGuardrail(
@@ -102,6 +106,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     registry = InMemoryAgentRegistry()
     registry.register(MainAgent(llm=claude, repo=repo, soporte=soporte))
 
+    # Ingesta de documentos (plan de documentos, E1). Flag apagado (default) →
+    # docs=None y el sistema se comporta EXACTAMENTE como antes.
+    docs = None
+    storage = None
+    if settings.docs_habilitado:
+        storage = SupabaseDocumentStorage(
+            settings.supabase_url, settings.supabase_key, settings.docs_bucket
+        )
+        docs = DocumentIngest(
+            repo=repo,
+            storage=storage,
+            channel=channel,
+            max_por_dia=settings.docs_max_por_dia,
+        )
+        log.info("Ingesta de documentos ACTIVA (bucket '%s').", settings.docs_bucket)
+
     process_message = ProcessMessage(
         repo=repo,
         guardrail=guardrail,
@@ -109,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         channel=channel,
         aviso_espera_umbral_s=settings.aviso_espera_umbral_s,
         memoria=memoria,
+        docs=docs,
     )
 
     scheduler = crear_scheduler(
@@ -123,6 +144,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
+        # Guard de arranque (riesgo R10): con documentos activos, un deploy sin
+        # el bucket debe ABORTAR con mensaje claro, no fallar en runtime.
+        if storage is not None:
+            storage.verificar_bucket()
         if settings.scheduler_habilitado:
             scheduler.start()
             log.info("Scheduler de alertas iniciado (cada %s min).", settings.scheduler_intervalo_min)

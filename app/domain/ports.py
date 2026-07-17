@@ -29,6 +29,7 @@ from app.domain.models import (
     Budget,
     Category,
     ConversationSummary,
+    Document,
     GuardrailResult,
     IncomingMessage,
     LLMResponse,
@@ -373,4 +374,54 @@ class Repository(Protocol):
         ...
 
     def delete_session(self, token_hash: str) -> None:
+        ...
+
+    # --- documentos financieros (plan de documentos, E1) ----------------------
+    def save_document(self, document: "Document") -> "Document":
+        ...
+
+    def get_document(self, user_id: UUID, document_id: UUID) -> Optional["Document"]:
+        """Un documento por id, SIEMPRE filtrado por user_id (§7.3.2)."""
+        ...
+
+    def find_document_by_sha(self, user_id: UUID, sha256: str) -> Optional["Document"]:
+        """Dedupe por hash del archivo original (unique user_id+sha256)."""
+        ...
+
+    def find_document_esperando(self, user_id: UUID) -> Optional["Document"]:
+        """El documento más reciente en status='esperando_clasificacion' del
+        usuario (para resolver la respuesta de letra del menú)."""
+        ...
+
+    def update_document(
+        self,
+        user_id: UUID,
+        document_id: UUID,
+        cambios: dict,
+    ) -> Optional["Document"]:
+        """Actualiza campos (status, tipo_documento, extracción...) del documento,
+        filtrado por user_id."""
+        ...
+
+    def count_documents_desde(self, user_id: UUID, desde: datetime) -> int:
+        """Documentos recibidos por el usuario desde `desde` (rate limit diario)."""
+        ...
+
+
+class DocumentStorage(Protocol):
+    """Almacén de originales (plan de documentos). El core no sabe que es
+    Supabase Storage. El archivo se guarda TAL CUAL llegó (bytes originales:
+    el XML firmado del SRI es el documento legal — jamás re-serializarlo)."""
+
+    def guardar(self, path: str, contenido: bytes, content_type: str) -> None:
+        ...
+
+    def leer(self, path: str) -> bytes:
+        ...
+
+    def signed_url(self, path: str, expira_s: int = 600) -> str:
+        ...
+
+    def borrar(self, path: str) -> None:
+        """Derecho de supresión (LOPDP)."""
         ...

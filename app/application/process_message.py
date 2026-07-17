@@ -103,6 +103,7 @@ class ProcessMessage:
         historial_n: int = 10,
         aviso_espera_umbral_s: float = 2.0,
         memoria: Optional[MemoriaSemantica] = None,
+        docs=None,
     ) -> None:
         self._repo = repo
         self._guardrail = guardrail
@@ -114,6 +115,9 @@ class ProcessMessage:
         # Memoria semántica (Parte A). None = apagada: el asistente usa solo la
         # ventana reciente (comportamiento previo a esta feature).
         self._memoria = memoria
+        # Ingesta de documentos (plan de documentos, E1). None = DOCS_HABILITADO
+        # apagado: cero cambios de comportamiento.
+        self._docs = docs
 
     async def __call__(self, incoming: IncomingMessage) -> None:
         """Pipeline completo en una llamada (tests, canales sin webhook)."""
@@ -161,7 +165,21 @@ class ProcessMessage:
             self._repo.save_message,
             Message(user_id=user.id, rol=Rol.USUARIO, contenido=contenido),
         )
-        if veredicto.sensible:
+
+        # --- documentos (E1): respuesta de letra al menú A–E ------------------
+        # Va ANTES del veredicto del guardrail (riesgo R3): una letra es un
+        # dispatch determinista, no "contenido" — ni un fail-closed de Groq debe
+        # escalarla. Solo aplica a mensajes de texto con documento pendiente.
+        es_dispatch_docs = False
+        if self._docs is not None and not incoming.media:
+            reescrito = await self._docs.atender_letra(user, incoming)
+            if reescrito is not None:
+                # Letra A–E: el mensaje se reescribe con el documento guardado +
+                # el contexto de la clasificación, y sigue al agente normal.
+                incoming = reescrito
+                es_dispatch_docs = True
+
+        if veredicto.sensible and not es_dispatch_docs:
             await self._escalar(user, incoming, veredicto, mensaje)
             return None
 
@@ -180,6 +198,17 @@ class ProcessMessage:
             mensaje_id=mensaje.id,
             transaccion_pendiente=pendiente,
         )
+
+    async def atender_media_o_agente(self, context: AgentContext) -> None:
+        """Punto de entrada del background para mensajes CON media (el webhook
+        lo llama tras descargar los adjuntos). Con el flujo de documentos activo,
+        la ingesta decide: si atiende el mensaje (menú/duplicado/respaldo), el
+        agente no corre; si no (caption claro / fallo), pipeline A como siempre."""
+        if self._docs is not None and context.incoming.media:
+            atendido = await self._docs.atender_media(context)
+            if atendido:
+                return
+        await self.run_agent(context)
 
     # ------------------------------------------------------------------ etapa 2
     async def run_agent(self, context: AgentContext) -> None:

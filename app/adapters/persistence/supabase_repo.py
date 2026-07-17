@@ -23,6 +23,7 @@ from app.domain.models import (
     Budget,
     Category,
     ConversationSummary,
+    Document,
     Message,
     Recuerdo,
     RecurringIncome,
@@ -523,6 +524,67 @@ class SupabaseRepository:
 
     def delete_session(self, token_hash: str) -> None:
         self._db.table("sessions").delete().eq("token_hash", token_hash).execute()
+
+    # --- documentos financieros (plan de documentos, E1) ----------------------
+    def save_document(self, document: Document) -> Document:
+        res = self._db.table("documents").insert(_dump(document)).execute()
+        return Document(**res.data[0])
+
+    def get_document(self, user_id: UUID, document_id: UUID) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("id", str(document_id))
+            .limit(1)
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
+    def find_document_by_sha(self, user_id: UUID, sha256: str) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("sha256", sha256)
+            .limit(1)
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
+    def find_document_esperando(self, user_id: UUID) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("status", "esperando_clasificacion")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
+    def update_document(
+        self, user_id: UUID, document_id: UUID, cambios: dict
+    ) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .update(cambios)
+            .eq("user_id", str(user_id))
+            .eq("id", str(document_id))
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
+    def count_documents_desde(self, user_id: UUID, desde: datetime) -> int:
+        res = (
+            self._db.table("documents")
+            .select("id", count="exact")
+            .eq("user_id", str(user_id))
+            .gte("created_at", desde.isoformat())
+            .execute()
+        )
+        return res.count or 0
 
 
 def _inicio_periodo(periodo: str):

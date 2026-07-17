@@ -56,6 +56,11 @@ class Settings:
     auth_demo_otp: str
     # Memoria semántica (Parte A). VOYAGE_API_KEY vacío = memoria apagada: el
     # asistente usa solo la ventana reciente (comportamiento previo).
+    # Ingesta de documentos (plan de documentos, E1). Flag maestro apagado por
+    # defecto: sin él, cero cambios de comportamiento.
+    docs_habilitado: bool
+    docs_bucket: str
+    docs_max_por_dia: int
     voyage_api_key: str
     voyage_model: str
     memoria_top_k: int
@@ -101,6 +106,10 @@ class Settings:
             scheduler_intervalo_min=int(os.environ.get("SCHEDULER_INTERVALO_MIN", "30")),
             aviso_espera_umbral_s=float(os.environ.get("AVISO_ESPERA_UMBRAL_S", "2.0")),
             auth_demo_otp=os.environ.get("AUTH_DEMO_OTP", ""),
+            docs_habilitado=os.environ.get("DOCS_HABILITADO", "false").lower()
+            in ("1", "true", "yes"),
+            docs_bucket=os.environ.get("DOCS_BUCKET", "documentos"),
+            docs_max_por_dia=int(os.environ.get("DOCS_MAX_POR_DIA", "20")),
             voyage_api_key=os.environ.get("VOYAGE_API_KEY", ""),
             voyage_model=os.environ.get("VOYAGE_MODEL", "voyage-3.5-lite"),
             memoria_top_k=int(os.environ.get("MEMORIA_TOP_K", "5")),

@@ -116,6 +116,10 @@ class FakeProcess:
     async def run_agent(self, context) -> None:
         self.agentes.append(context)
 
+    async def atender_media_o_agente(self, context) -> None:
+        # Mismo contrato que ProcessMessage sin docs: pasa directo al agente.
+        await self.run_agent(context)
+
 
 def _app(process: FakeProcess, validar_firma: bool = False) -> FastAPI:
     app = FastAPI()
