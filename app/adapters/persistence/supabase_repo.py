@@ -672,7 +672,7 @@ class SupabaseRepository:
 
     def complete_review_task(self, user_id, task_id) -> None:
         self._db.table("review_tasks").update(
-            {"status": "completada", "completed_at": _utcnow().isoformat()}
+            {"status": "completada", "completed_at": datetime.now(timezone.utc).isoformat()}
         ).eq("user_id", str(user_id)).eq("id", str(task_id)).execute()
 
     def list_documents(
