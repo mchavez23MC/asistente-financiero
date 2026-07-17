@@ -4,7 +4,8 @@ Gate de la fase:
   - frase con término de denylist → sensible sin inferencia (capa 1);
   - clasificación con baja confianza → forzada sensible (capa 2);
   - Groq caído o colgado → fail-closed, el mensaje no fluye sin clasificar;
-  - ruta sensible → Ticket con contexto y el agente NUNCA se invoca.
+  - ruta sensible → se DECLINA sin ticket y el agente NUNCA se invoca;
+  - pedido explícito de humano → ticket (con límite de 1 cada 5 horas).
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from app.adapters.guardrail.layered import LayeredGuardrail
 from app.application.process_message import (
     RESPUESTA_FAIL_CLOSED,
     RESPUESTA_SENSIBLE,
+    RESPUESTA_TICKET_CREADO,
+    RESPUESTA_TICKET_EN_COLA,
     ProcessMessage,
 )
 from app.application.router import InMemoryAgentRegistry
@@ -184,36 +187,74 @@ def _msg(texto: str) -> IncomingMessage:
     return IncomingMessage(canal="fake", telefono="+50370000000", texto=texto)
 
 
-async def test_ruta_sensible_crea_ticket_y_no_llega_al_agente():
+async def test_ruta_sensible_declina_sin_ticket_y_no_llega_al_agente():
     g = LayeredGuardrail(FakeClassifier(_ok()))
     process, repo, channel = _pipeline_sensible(g)
     await process(_msg("hola"))  # consentimiento
     await process(_msg("quiero invertir en cripto"))
 
-    assert len(repo.tickets) == 1
-    ticket = repo.list_tickets()[0]
-    assert ticket.motivo == "consejo_inversion"
-    assert "fuente=denylist" in ticket.contexto
-    assert ticket.mensaje_origen_id is not None
+    # Nuevo comportamiento: se DECLINA, sin crear ticket (nadie pidió humano).
+    assert len(repo.tickets) == 0
     assert channel.enviados[-1][1] == RESPUESTA_SENSIBLE
-    # Audit: la respuesta de escalación quedó con intención 'sensible'.
+    # Audit: la respuesta declinada queda con intención 'sensible'.
     assert repo.messages[-1].intencion == "sensible"
 
 
-async def test_fail_closed_crea_ticket_con_motivo_propio():
+async def test_fail_closed_pide_reintento_sin_ticket():
     g = LayeredGuardrail(BrokenClassifier())
     process, repo, channel = _pipeline_sensible(g)
     await process(_msg("hola"))
     await process(_msg("gasté 25 en pupusas"))  # normal, pero Groq está caído
 
-    assert repo.list_tickets()[0].motivo == "guardrail_fail_closed"
+    assert len(repo.tickets) == 0
     assert channel.enviados[-1][1] == RESPUESTA_FAIL_CLOSED
 
 
-async def test_fraude_escala_con_prioridad_alta():
+async def test_fraude_sin_pedir_humano_declina_sin_ticket():
     g = LayeredGuardrail(FakeClassifier(_ok()))
-    process, repo, _ = _pipeline_sensible(g)
+    process, repo, channel = _pipeline_sensible(g)
     await process(_msg("hola"))
     await process(_msg("me estafaron con un cobro"))
-    assert repo.list_tickets()[0].motivo == "fraude"
-    assert repo.list_tickets()[0].prioridad == "alta"
+    assert len(repo.tickets) == 0
+    assert channel.enviados[-1][1] == RESPUESTA_SENSIBLE
+
+
+async def test_pedido_explicito_de_humano_crea_ticket():
+    """El usuario pide una persona explícitamente → sí se escala (aunque el tema
+    sea sensible), con la prioridad/motivo del guardrail."""
+    g = LayeredGuardrail(FakeClassifier(_ok()))
+    process, repo, channel = _pipeline_sensible(g)
+    await process(_msg("hola"))
+    await process(_msg("me estafaron, quiero hablar con una persona"))
+
+    assert len(repo.tickets) == 1
+    ticket = repo.list_tickets()[0]
+    assert ticket.motivo == "fraude"
+    assert ticket.prioridad == "alta"
+    assert ticket.mensaje_origen_id is not None
+    assert channel.enviados[-1][1] == RESPUESTA_TICKET_CREADO
+    assert repo.messages[-1].intencion == "sensible"
+
+
+async def test_pedido_de_humano_no_sensible_crea_ticket_motivo_otro():
+    g = LayeredGuardrail(FakeClassifier(_ok()))
+    process, repo, channel = _pipeline_sensible(g)
+    await process(_msg("hola"))
+    await process(_msg("quiero hablar con alguien de soporte"))
+
+    assert len(repo.tickets) == 1
+    assert repo.list_tickets()[0].motivo == "otro"
+    assert channel.enviados[-1][1] == RESPUESTA_TICKET_CREADO
+
+
+async def test_segundo_pedido_dentro_de_5h_no_crea_otro_ticket():
+    g = LayeredGuardrail(FakeClassifier(_ok()))
+    process, repo, channel = _pipeline_sensible(g)
+    await process(_msg("hola"))
+    await process(_msg("conéctame con una persona"))
+    assert len(repo.tickets) == 1
+
+    # Segundo pedido inmediato: dentro del cooldown de 5h, no se crea otro.
+    await process(_msg("necesito hablar con alguien otra vez"))
+    assert len(repo.tickets) == 1
+    assert channel.enviados[-1][1] == RESPUESTA_TICKET_EN_COLA
