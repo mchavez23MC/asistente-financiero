@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Mis respaldos</title>
+  <link rel="stylesheet" href="/assets/css/tokens.css">
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <style>
+    .doc-tabla { width:100%; border-collapse:collapse; font-size:14px; }
+    .doc-tabla th, .doc-tabla td { padding:8px 6px; border-bottom:1px solid var(--border,#e5e7eb); text-align:left; }
+    .doc-tabla td.num { text-align:right; font-variant-numeric:tabular-nums; }
+    .chip { font-size:12px; padding:2px 8px; border-radius:999px; background:var(--muted-bg,#f1f5f9); }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside id="app-sidebar"></aside>
+    <div class="content">
+      <header id="app-topbar"></header>
+      <main class="page">
+        <h1 class="h2 mb-4">Mis respaldos</h1>
+        <p class="muted mb-16">Los documentos que le has enviado a Luca.</p>
+
+        <div class="card" id="rev-aviso" style="display:none"></div>
+        <div class="card">
+          <div style="overflow-x:auto">
+            <table class="doc-tabla">
+              <thead><tr><th>Tipo</th><th>Emisor</th><th>Fecha</th><th class="num">Total</th><th>Estado</th></tr></thead>
+              <tbody id="doc-body"><tr><td colspan="5" class="muted">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/shell.js"></script>
+  <script>
+  (function () {
+    if (!LUCA.requirePhone()) return;
+    function esc(s) { var d = document.createElement('div'); d.textContent = (s == null ? '' : s); return d.innerHTML; }
+    var ESTADO = { confirmado: '✅ registrado', en_revision: '⏳ por revisar', error: '⚠️ error' };
+
+    // Aviso si hay revisiones pendientes.
+    LUCA.api('/api/tareas').then(function (r) { return r.json(); }).then(function (d) {
+      if (d.pendientes > 0) {
+        var a = document.getElementById('rev-aviso');
+        a.style.display = 'block';
+        a.innerHTML = '📄 Tienes <b>' + d.pendientes + '</b> estado(s) de cuenta por revisar. '
+          + d.tareas.map(function (t) { return '<a href="/app/revisar/' + t.id + '">' + esc(t.resumen) + '</a>'; }).join(' · ');
+      }
+    }).catch(function () {});
+
+    LUCA.api('/api/documentos').then(function (r) { return r.json(); }).then(function (data) {
+      var docs = (data && data.documentos) || [];
+      var body = document.getElementById('doc-body');
+      if (!docs.length) { body.innerHTML = '<tr><td colspan="5" class="muted">Aún no me has enviado documentos.</td></tr>'; return; }
+      body.innerHTML = docs.map(function (d) {
+        return '<tr>'
+          + '<td>' + esc((d.tipo || '').replace(/_/g, ' ')) + '</td>'
+          + '<td>' + esc(d.emisor || '—') + '</td>'
+          + '<td>' + esc(d.fecha || '—') + '</td>'
+          + '<td class="num">' + (d.total != null ? '$' + d.total.toFixed(2) : '—') + '</td>'
+          + '<td><span class="chip">' + esc(ESTADO[d.status] || d.status) + '</span></td>'
+          + '</tr>';
+      }).join('');
+    }).catch(function () {
+      document.getElementById('doc-body').innerHTML = '<tr><td colspan="5" class="muted">No se pudieron cargar.</td></tr>';
+    });
+  })();
+  </script>
+</body>
+</html>

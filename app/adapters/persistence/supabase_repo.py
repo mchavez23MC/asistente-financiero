@@ -24,7 +24,9 @@ from app.domain.models import (
     Category,
     ConversationSummary,
     Document,
+    DocumentItem,
     Message,
+    ReviewTask,
     Recuerdo,
     RecurringIncome,
     Session,
@@ -598,6 +600,80 @@ class SupabaseRepository:
             .execute()
         )
         return res.count or 0
+
+    # --- staging de carga masiva (E3) ----------------------------------------
+    def save_document_items(self, items: list[DocumentItem]) -> list[DocumentItem]:
+        if not items:
+            return []
+        res = self._db.table("document_items").insert([_dump(i) for i in items]).execute()
+        return [DocumentItem(**row) for row in res.data]
+
+    def list_document_items(self, document_id, user_id) -> list[DocumentItem]:
+        res = (
+            self._db.table("document_items")
+            .select("*")
+            .eq("document_id", str(document_id))
+            .eq("user_id", str(user_id))
+            .order("n_linea")
+            .execute()
+        )
+        return [DocumentItem(**row) for row in res.data]
+
+    def update_document_items(self, user_id, cambios: list[dict]) -> None:
+        for cambio in cambios:
+            item_id = cambio.get("id")
+            if not item_id:
+                continue
+            campos = {k: v for k, v in cambio.items() if k != "id"}
+            self._db.table("document_items").update(campos).eq("id", str(item_id)).eq(
+                "user_id", str(user_id)
+            ).execute()
+
+    def insert_transactions_batch(
+        self, transacciones: list[Transaction], document_id=None
+    ) -> list[Transaction]:
+        if not transacciones:
+            return []
+        filas = []
+        for t in transacciones:
+            fila = _dump(t)
+            fila["source"] = "documento"
+            if document_id is not None:
+                fila["document_id"] = str(document_id)
+            filas.append(fila)
+        res = self._db.table("transactions").insert(filas).execute()
+        return [Transaction(**{k: v for k, v in row.items() if k not in ("source", "document_id")}) for row in res.data]
+
+    def create_review_task(self, task: ReviewTask) -> ReviewTask:
+        res = self._db.table("review_tasks").insert(_dump(task)).execute()
+        return ReviewTask(**res.data[0])
+
+    def get_review_task(self, user_id, task_id) -> Optional[ReviewTask]:
+        res = (
+            self._db.table("review_tasks")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("id", str(task_id))
+            .limit(1)
+            .execute()
+        )
+        return ReviewTask(**res.data[0]) if res.data else None
+
+    def list_review_tasks(self, user_id, status=None) -> list[ReviewTask]:
+        q = (
+            self._db.table("review_tasks")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .order("created_at", desc=True)
+        )
+        if status:
+            q = q.eq("status", status)
+        return [ReviewTask(**row) for row in q.execute().data]
+
+    def complete_review_task(self, user_id, task_id) -> None:
+        self._db.table("review_tasks").update(
+            {"status": "completada", "completed_at": _utcnow().isoformat()}
+        ).eq("user_id", str(user_id)).eq("id", str(task_id)).execute()
 
     def list_documents(
         self, user_id, desde=None, hasta=None, tipo=None, limite=10

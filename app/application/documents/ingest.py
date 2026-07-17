@@ -33,10 +33,14 @@ from app.domain.models import (
     Intencion,
     MediaItem,
     Message,
+    ReviewTask,
+    ReviewTaskTipo,
     Rol,
     TipoDocumento,
     User,
 )
+from app.adapters.documents.tabular import leer_tabla
+from app.application.documents.estado_cuenta import procesar_estado_cuenta
 from app.application.documents.factura_xml import FacturaXML, parsear_factura_sri
 from app.domain.ports import ChannelAdapter, DocumentStorage, Repository
 
@@ -62,6 +66,11 @@ RESPUESTA_XML_TABULAR = (
     "Recibí tu archivo y lo guardé de respaldo 📁 El procesamiento automático "
     "de este tipo de archivo llega prontito; mientras tanto, si me dices qué "
     "registrar, lo anoto de una."
+)
+RESPUESTA_TABULAR_NO_RECONOCIDO = (
+    "Recibí tu archivo y lo guardé de respaldo 📁 pero no pude reconocer las "
+    "columnas para leerlo como estado de cuenta. Si me dices qué registrar, lo "
+    "anoto; o mándamelo con columnas de fecha, descripción y monto."
 )
 RESPUESTA_FACTURA_DUPLICADA = (
     "Esa factura ya la tengo registrada ✅ (la reconocí por su clave de acceso "
@@ -118,11 +127,13 @@ class DocumentIngest:
         storage: DocumentStorage,
         channel: ChannelAdapter,
         max_por_dia: int = 20,
+        public_base_url: str = "",
     ) -> None:
         self._repo = repo
         self._storage = storage
         self._channel = channel
         self._max_por_dia = max_por_dia
+        self._public_base_url = public_base_url.rstrip("/")
 
     # ------------------------------------------------------- mensajes con media
     async def atender_media(self, context: AgentContext) -> bool:
@@ -187,15 +198,8 @@ class DocumentIngest:
             return await self._procesar_factura_xml(context, doc, contenido)
 
         if item.es_tabular:
-            # Su pipeline (estado de cuenta) llega en E3; por ahora, respaldo.
-            await asyncio.to_thread(
-                self._repo.update_document,
-                user.id,
-                doc.id,
-                {"tipo_documento": TipoDocumento.OTRO_RESPALDO.value, "status": DocumentStatus.CONFIRMADO.value},
-            )
-            await self._responder(user, RESPUESTA_XML_TABULAR)
-            return True
+            # E3: estado de cuenta → parseo por script + staging para revisión.
+            return await self._procesar_estado_cuenta(context, doc, item, contenido)
 
         if incoming.texto.strip():
             # Caption claro: el pipeline A sigue su curso normal por el agente;
@@ -211,6 +215,71 @@ class DocumentIngest:
         )
         await self._responder(user, MENU_CLASIFICACION)
         return True
+
+    async def _procesar_estado_cuenta(
+        self, context: AgentContext, doc: Document, item: MediaItem, contenido: bytes
+    ) -> bool:
+        """E3: CSV/XLSX del banco → filas normalizadas en staging + tarea de
+        revisión en la webapp. Nada toca `transactions` hasta que el usuario
+        confirma en su panel (riesgo R1). Devuelve True (atendido)."""
+        user = context.user
+        filas = leer_tabla(contenido, item.content_type, item.filename)
+        es_dup = await self._detector_duplicados(user.id)
+        resultado = procesar_estado_cuenta(filas, doc.id, user.id, es_dup)
+
+        if not resultado.columnas_detectadas or not resultado.items:
+            # No se reconoció como estado de cuenta → respaldo (como antes).
+            await asyncio.to_thread(
+                self._repo.update_document,
+                user.id,
+                doc.id,
+                {"tipo_documento": TipoDocumento.OTRO_RESPALDO.value, "status": DocumentStatus.CONFIRMADO.value},
+            )
+            await self._responder(user, RESPUESTA_TABULAR_NO_RECONOCIDO)
+            return True
+
+        await asyncio.to_thread(self._repo.save_document_items, resultado.items)
+        tarea = await asyncio.to_thread(
+            self._repo.create_review_task,
+            ReviewTask(
+                user_id=user.id,
+                document_id=doc.id,
+                tipo=ReviewTaskTipo.CARGA_MASIVA,
+                resumen=resultado.resumen,
+            ),
+        )
+        await asyncio.to_thread(
+            self._repo.update_document,
+            user.id,
+            doc.id,
+            {
+                "tipo_documento": TipoDocumento.ESTADO_CUENTA.value,
+                "status": DocumentStatus.EN_REVISION.value,
+                "metodo_extraccion": "csv_parser",
+            },
+        )
+        link = f"{self._public_base_url}/app/revisar/{tarea.id}"
+        await self._responder(
+            user,
+            f"Leí tu estado de cuenta 📄 son {len(resultado.items)} movimientos "
+            f"({resultado.resumen}). Te lo dejé listo para revisar y confirmar en "
+            f"tu panel, es rápido:\n{link}\nCuando termines, lo registro todo 🙌",
+        )
+        return True
+
+    async def _detector_duplicados(self, user_id):
+        """Set de (fecha, monto) de las transacciones confirmadas del usuario,
+        para marcar en rojo las filas del estado de cuenta que ya estaban
+        registradas (por chat o foto) — riesgo R13."""
+        previas = await asyncio.to_thread(
+            self._repo.list_transactions, user_id, 300, None, None, True
+        )
+        claves = {
+            (t.fecha, f"{abs(t.monto):.2f}")
+            for t in previas
+            if t.fecha is not None and t.monto is not None
+        }
+        return lambda fecha, monto: (fecha, f"{abs(monto):.2f}") in claves
 
     async def _procesar_factura_xml(
         self, context: AgentContext, doc: Document, contenido: bytes

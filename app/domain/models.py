@@ -566,3 +566,64 @@ class Document(BaseModel):
     error_detalle: Optional[str] = None
     created_at: datetime = Field(default_factory=_utcnow)
     processed_at: Optional[datetime] = None
+
+
+class DocumentItemEstado(str, Enum):
+    PENDIENTE = "pendiente"
+    ACEPTADO = "aceptado"
+    RECHAZADO = "rechazado"
+    DUPLICADO = "duplicado"
+
+
+class DocumentItem(BaseModel):
+    """Una fila del staging de una carga masiva (estado de cuenta). NO es una
+    transacción: vive en `document_items` hasta que el usuario la confirma en la
+    webapp, y solo entonces se materializa en `transactions` (riesgo R1)."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: Optional[UUID] = None
+    document_id: UUID
+    user_id: UUID
+    n_linea: int
+    fecha: Optional[date] = None
+    descripcion_raw: str
+    monto: Optional[Decimal] = None
+    tipo: Optional[str] = None  # 'gasto' | 'ingreso'
+    categoria_sugerida: Optional[str] = None
+    counterparty_id: Optional[UUID] = None
+    confianza: Optional[float] = None
+    estado: DocumentItemEstado = DocumentItemEstado.PENDIENTE
+    transaction_id: Optional[UUID] = None
+
+
+class ReviewTaskTipo(str, Enum):
+    CARGA_MASIVA = "carga_masiva"
+    MAPEO = "mapeo"
+    DATO_FALTANTE = "dato_faltante"
+    AJUSTE_NC = "ajuste_nc"
+    DIVISION_ITEMS = "division_items"
+
+
+class ReviewTaskStatus(str, Enum):
+    PENDIENTE = "pendiente"
+    EN_PROGRESO = "en_progreso"
+    COMPLETADA = "completada"
+    EXPIRADA = "expirada"
+    DESCARTADA = "descartada"
+
+
+class ReviewTask(BaseModel):
+    """Una tarea en la cola de revisión de la webapp (estado de cuenta con muchos
+    movimientos → el usuario los confirma en bloque en su panel)."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: Optional[UUID] = None
+    user_id: UUID
+    document_id: UUID
+    tipo: ReviewTaskTipo = ReviewTaskTipo.CARGA_MASIVA
+    status: ReviewTaskStatus = ReviewTaskStatus.PENDIENTE
+    resumen: str
+    created_at: datetime = Field(default_factory=_utcnow)
+    completed_at: Optional[datetime] = None

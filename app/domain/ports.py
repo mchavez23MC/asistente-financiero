@@ -30,12 +30,14 @@ from app.domain.models import (
     Category,
     ConversationSummary,
     Document,
+    DocumentItem,
     GuardrailResult,
     IncomingMessage,
     LLMResponse,
     Message,
     Recuerdo,
     RecurringIncome,
+    ReviewTask,
     Session,
     Ticket,
     Transaction,
@@ -425,6 +427,45 @@ class Repository(Protocol):
         """Respaldos del usuario, más recientes primero, filtrables por rango de
         fecha de recepción (YYYY-MM-DD) y tipo. Grounded: el sistema lista, Luca
         explica (consultar_documentos)."""
+        ...
+
+
+    # --- staging de carga masiva (estado de cuenta, E3) ----------------------
+    def save_document_items(self, items: list["DocumentItem"]) -> list["DocumentItem"]:
+        """Inserta el staging en bloque (una llamada). No toca transactions."""
+        ...
+
+    def list_document_items(self, document_id: UUID, user_id: UUID) -> list["DocumentItem"]:
+        ...
+
+    def update_document_items(self, user_id: UUID, cambios: list[dict]) -> None:
+        """Aplica ediciones/aceptaciones en bloque desde la revisión (cada dict
+        trae al menos {'id': ...} + los campos a cambiar)."""
+        ...
+
+    def insert_transactions_batch(
+        self, transacciones: list["Transaction"], document_id: Optional[UUID] = None
+    ) -> list["Transaction"]:
+        """LA materialización: inserta con status='confirmada' directamente (la
+        confirmación humana ya ocurrió en la revisión) para no chocar con el
+        índice único de pendientes (riesgo R1). Marca source='documento' y el
+        document_id de respaldo — columnas que solo existen con la migración de
+        documentos, por eso el insert normal (save_transaction) no las envía."""
+        ...
+
+    def create_review_task(self, task: "ReviewTask") -> "ReviewTask":
+        ...
+
+    def get_review_task(self, user_id: UUID, task_id: UUID) -> Optional["ReviewTask"]:
+        """Filtrada por user_id: una tarea ajena devuelve None (aislamiento)."""
+        ...
+
+    def list_review_tasks(
+        self, user_id: UUID, status: Optional[str] = None
+    ) -> list["ReviewTask"]:
+        ...
+
+    def complete_review_task(self, user_id: UUID, task_id: UUID) -> None:
         ...
 
 

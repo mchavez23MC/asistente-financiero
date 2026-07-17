@@ -82,6 +82,27 @@ class FakeRepo:
         self.messages.append(message)
         return message
 
+    # estado de cuenta (E3)
+    def __post_init_docs__(self):
+        pass
+
+    def list_transactions(self, user_id, limite=5, tipo=None, categoria=None, solo_confirmadas=True):
+        return getattr(self, "transactions", [])
+
+    def save_document_items(self, items):
+        if not hasattr(self, "items"):
+            self.items = []
+        guardados = [i.model_copy(update={"id": i.id or uuid4()}) for i in items]
+        self.items.extend(guardados)
+        return guardados
+
+    def create_review_task(self, task):
+        if not hasattr(self, "review_tasks"):
+            self.review_tasks = []
+        t = task.model_copy(update={"id": task.id or uuid4()})
+        self.review_tasks.append(t)
+        return t
+
 
 class FakeStorage:
     def __init__(self, fallar: bool = False) -> None:
@@ -361,3 +382,81 @@ async def test_xml_no_sri_se_guarda_como_respaldo():
     doc = next(iter(repo.documents.values()))
     assert doc.tipo_documento == "otro_respaldo"
     assert "guardé" in channel.enviados[0]
+
+
+# --- estado de cuenta (E3): CSV → staging + tarea de revisión ----------------
+_CSV = (
+    "Fecha,Descripcion,Monto\n"
+    "10/07/2026,SUPERMAXI,-32.50\n"
+    "12/07/2026,SUELDO ACME,1200.00\n"
+).encode()
+
+
+def _ctx_csv(user: User, contenido: bytes = _CSV) -> AgentContext:
+    return AgentContext(
+        user=user,
+        incoming=IncomingMessage(
+            canal="whatsapp",
+            telefono=user.telefono,
+            texto="",
+            media=[
+                MediaItem(
+                    content_type="text/csv",
+                    url="https://x",
+                    data_base64=base64.b64encode(contenido).decode(),
+                    filename="estado.csv",
+                )
+            ],
+        ),
+        historial=[],
+    )
+
+
+async def test_estado_cuenta_crea_staging_y_tarea_con_link():
+    repo, channel = FakeRepo(), FakeChannel()
+    ingest = _ingest(repo=repo, channel=channel, public_base_url="https://luca.app")
+    user = _user()
+
+    atendido = await ingest.atender_media(_ctx_csv(user))
+
+    assert atendido is True
+    # Se guardaron los 2 movimientos en staging, NADA en transactions.
+    assert len(repo.items) == 2
+    assert len(repo.review_tasks) == 1
+    doc = next(iter(repo.documents.values()))
+    assert doc.tipo_documento == "estado_cuenta"
+    assert doc.status == "en_revision"
+    # La respuesta trae el deep link a la revisión.
+    assert f"https://luca.app/app/revisar/{repo.review_tasks[0].id}" in channel.enviados[-1]
+
+
+async def test_estado_cuenta_marca_duplicado_contra_transacciones():
+    from datetime import date
+    from decimal import Decimal
+
+    from app.domain.models import Transaction
+
+    repo, channel = FakeRepo(), FakeChannel()
+    user = _user()
+    # Un gasto de 32.50 del 10/07 ya registrado por chat.
+    repo.transactions = [
+        Transaction(user_id=user.id, tipo="gasto", monto=Decimal("32.50"), fecha=date(2026, 7, 10), status="confirmada")
+    ]
+    ingest = _ingest(repo=repo, channel=channel)
+
+    await ingest.atender_media(_ctx_csv(user))
+
+    dup = [i for i in repo.items if i.estado == "duplicado"]
+    assert len(dup) == 1 and dup[0].descripcion_raw == "SUPERMAXI"
+
+
+async def test_csv_no_reconocido_cae_a_respaldo():
+    repo, channel = FakeRepo(), FakeChannel()
+    ingest = _ingest(repo=repo, channel=channel)
+    user = _user()
+
+    await ingest.atender_media(_ctx_csv(user, b"cualquiera,cosa\n1,2\n"))
+
+    doc = next(iter(repo.documents.values()))
+    assert doc.tipo_documento == "otro_respaldo"
+    assert not hasattr(repo, "review_tasks") or repo.review_tasks == []

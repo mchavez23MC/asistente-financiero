@@ -8,6 +8,7 @@ LUCA.nav = [
   { id: 'inicio', href: '/app/inicio', label: 'Inicio', icon: 'home' },
   { id: 'chat', href: '/app/chat', label: 'Chat con Luca', icon: 'chat' },
   { id: 'movimientos', href: '/app/movimientos', label: 'Movimientos', icon: 'arrow-left-right' },
+  { id: 'documentos', href: '/app/documentos', label: 'Mis respaldos', icon: 'file' },
   { id: 'presupuestos', href: '/app/presupuestos', label: 'Presupuestos', icon: 'target' },
   { id: 'soporte', href: '/app/tickets', label: 'Mis tickets', icon: 'headphones' }
 ];

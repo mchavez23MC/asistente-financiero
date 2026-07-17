@@ -34,7 +34,15 @@ from app.application.router import InMemoryAgentRegistry
 from app.infra.config import Settings
 from app.infra.scheduler import crear_scheduler
 from app.application.auth import AuthService
-from app.interfaces.api import legal, pages, panel, web_chat, webapp_api, webhook_twilio
+from app.interfaces.api import (
+    documentos_api,
+    legal,
+    pages,
+    panel,
+    web_chat,
+    webapp_api,
+    webhook_twilio,
+)
 
 log = logging.getLogger("e5")
 
@@ -119,6 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             storage=storage,
             channel=channel,
             max_por_dia=settings.docs_max_por_dia,
+            public_base_url=settings.public_base_url,
         )
         log.info("Ingesta de documentos ACTIVA (bucket '%s').", settings.docs_bucket)
 
@@ -190,6 +199,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(web_chat.router)
     app.include_router(legal.router)
     app.include_router(webapp_api.router)
+    app.include_router(documentos_api.router)
     # Vistas de la webapp como endpoints con URL limpia (sin .html) — ver
     # app/interfaces/api/pages.py. Solo los assets css/js van como estáticos.
     app.include_router(pages.router)
