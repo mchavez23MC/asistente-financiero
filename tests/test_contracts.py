@@ -89,6 +89,8 @@ def test_set_de_tools():
         "configurar_presupuesto",
         "responder_soporte",
         "crear_ticket",
+        "consultar_documentos",
+        "consultar_perfil",
     }
 
 

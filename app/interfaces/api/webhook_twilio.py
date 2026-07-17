@@ -58,10 +58,11 @@ async def recibir(request: Request, background: BackgroundTasks) -> Response:
 
 async def _descargar_media_y_correr(channel, process_message, context) -> None:
     """Background: baja los adjuntos del mensaje (fetch_media es tolerante a
-    fallos por adjunto) y recién ahí corre el agente, que arma los bloques
-    image/document para Claude con lo que sí se descargó."""
+    fallos por adjunto) y recién ahí decide: la ingesta de documentos (si está
+    activa) puede atender el mensaje (menú A–F, duplicado, respaldo); si no, el
+    agente arma los bloques image/document para Claude como siempre."""
     await channel.fetch_media(context.incoming)
-    await process_message.run_agent(context)
+    await process_message.atender_media_o_agente(context)
 
 
 def _firma_valida(request: Request, params: dict) -> bool:

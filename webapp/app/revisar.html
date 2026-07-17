@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luca — Revisar estado de cuenta</title>
+  <link rel="stylesheet" href="/assets/css/tokens.css">
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <style>
+    .rev-tabla { width:100%; border-collapse:collapse; font-size:14px; }
+    .rev-tabla th, .rev-tabla td { padding:8px 6px; border-bottom:1px solid var(--border,#e5e7eb); text-align:left; }
+    .rev-tabla td.num { text-align:right; font-variant-numeric:tabular-nums; }
+    .rev-scroll { overflow-x:auto; }
+    .sem { display:inline-block; width:10px; height:10px; border-radius:50%; }
+    .sem--ok { background:#16a34a; } .sem--rev { background:#eab308; } .sem--dup { background:#dc2626; }
+    .fila--excluida { opacity:.45; text-decoration:line-through; }
+    .rev-acciones { position:sticky; bottom:0; background:var(--bg,#fff); padding:12px 0; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside id="app-sidebar"></aside>
+    <div class="content">
+      <header id="app-topbar"></header>
+      <main class="page">
+        <h1 class="h2 mb-4">Revisar estado de cuenta</h1>
+        <p class="muted mb-16" id="rev-resumen">Cargando…</p>
+
+        <div class="card mb-16">
+          <div class="row wrap gap-8 mb-12">
+            <button class="btn btn--sm" id="btn-aceptar-verdes">Aceptar todos los válidos</button>
+            <button class="btn btn--sm" id="btn-excluir-dups">Excluir duplicados</button>
+          </div>
+          <div class="rev-scroll">
+            <table class="rev-tabla">
+              <thead>
+                <tr><th></th><th>Fecha</th><th>Descripción</th><th class="num">Monto</th><th>Tipo</th><th>Categoría</th><th>Incluir</th></tr>
+              </thead>
+              <tbody id="rev-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="rev-acciones row-between wrap gap-8">
+          <span class="muted" id="rev-conteo"></span>
+          <button class="btn btn--primary" id="btn-confirmar">Confirmar y registrar</button>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/shell.js"></script>
+  <script>
+  (function () {
+    if (!LUCA.requirePhone()) return;
+    var taskId = location.pathname.split('/').pop();
+    var items = [];
+
+    function taskUrl(sufijo) { return '/api/tareas/' + encodeURIComponent(taskId) + (sufijo || ''); }
+    function esc(s) { var d = document.createElement('div'); d.textContent = (s == null ? '' : s); return d.innerHTML; }
+
+    function semaforo(it) {
+      if (it.estado === 'duplicado') return '<span class="sem sem--dup" title="Posible duplicado"></span>';
+      if ((it.confianza || 0) < 0.8) return '<span class="sem sem--rev" title="Revisar"></span>';
+      return '<span class="sem sem--ok" title="OK"></span>';
+    }
+
+    function fila(it) {
+      var incluido = it.estado === 'aceptado';
+      var excluido = it.estado === 'rechazado';
+      return '<tr data-id="' + it.id + '" class="' + (excluido ? 'fila--excluida' : '') + '">'
+        + '<td>' + semaforo(it) + '</td>'
+        + '<td>' + esc(it.fecha || '—') + '</td>'
+        + '<td>' + esc(it.descripcion) + '</td>'
+        + '<td class="num">$' + (it.monto != null ? it.monto.toFixed(2) : '—') + '</td>'
+        + '<td><select class="select select--sm" data-campo="tipo">'
+        +   '<option value="gasto"' + (it.tipo === 'gasto' ? ' selected' : '') + '>Gasto</option>'
+        +   '<option value="ingreso"' + (it.tipo === 'ingreso' ? ' selected' : '') + '>Ingreso</option>'
+        + '</select></td>'
+        + '<td><input class="input input--sm" data-campo="categoria" value="' + esc(it.categoria || '') + '" placeholder="—" style="width:120px"></td>'
+        + '<td><input type="checkbox" data-campo="incluir"' + (incluido ? ' checked' : '') + (it.estado === 'duplicado' ? '' : '') + '></td>'
+        + '</tr>';
+    }
+
+    function contar() {
+      var n = items.filter(function (i) { return i.estado === 'aceptado'; }).length;
+      document.getElementById('rev-conteo').textContent = n + ' de ' + items.length + ' se registrarán';
+    }
+
+    function pintar() {
+      document.getElementById('rev-body').innerHTML = items.map(fila).join('');
+      contar();
+    }
+
+    function lookup(id) { for (var i = 0; i < items.length; i++) if (items[i].id === id) return items[i]; }
+
+    document.getElementById('rev-body').addEventListener('change', function (e) {
+      var tr = e.target.closest('tr'); if (!tr) return;
+      var it = lookup(tr.getAttribute('data-id')); if (!it) return;
+      var campo = e.target.getAttribute('data-campo');
+      if (campo === 'tipo') it.tipo = e.target.value;
+      if (campo === 'categoria') it.categoria = e.target.value;
+      if (campo === 'incluir') { it.estado = e.target.checked ? 'aceptado' : 'rechazado'; tr.className = e.target.checked ? '' : 'fila--excluida'; }
+      contar();
+    });
+
+    document.getElementById('btn-aceptar-verdes').addEventListener('click', function () {
+      items.forEach(function (i) { if (i.estado !== 'duplicado') i.estado = 'aceptado'; });
+      pintar();
+    });
+    document.getElementById('btn-excluir-dups').addEventListener('click', function () {
+      items.forEach(function (i) { if (i.estado === 'duplicado') i.estado = 'rechazado'; });
+      pintar();
+    });
+
+    document.getElementById('btn-confirmar').addEventListener('click', function () {
+      var btn = this; btn.disabled = true; btn.textContent = 'Registrando…';
+      var payload = { items: items.map(function (i) { return { id: i.id, estado: i.estado, tipo: i.tipo, categoria_sugerida: i.categoria }; }) };
+      LUCA.api(taskUrl('/items'), { method: 'PATCH', body: JSON.stringify(payload) })
+        .then(function () { return LUCA.api(taskUrl('/confirmar'), { method: 'POST' }); })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; }); })
+        .then(function (res) {
+          if (res.status === 409) { alert('Esta revisión ya fue confirmada.'); location.href = '/app/movimientos'; return; }
+          alert('Listo ✅ registré ' + (res.d.registrados || 0) + ' movimientos.');
+          location.href = '/app/movimientos';
+        })
+        .catch(function () { btn.disabled = false; btn.textContent = 'Confirmar y registrar'; alert('No se pudo confirmar; intenta de nuevo.'); });
+    });
+
+    LUCA.api(taskUrl()).then(function (r) {
+      if (r.status === 404) { document.getElementById('rev-resumen').textContent = 'No encontré esta revisión.'; return null; }
+      return r.json();
+    }).then(function (data) {
+      if (!data) return;
+      document.getElementById('rev-resumen').textContent = data.resumen || '';
+      items = (data.items || []).map(function (i) {
+        // Pre-aceptar los "verdes" (confianza alta y no duplicados).
+        if (i.estado === 'pendiente' && (i.confianza || 0) >= 0.8) i.estado = 'aceptado';
+        i.categoria = i.categoria || '';
+        return i;
+      });
+      pintar();
+    });
+  })();
+  </script>
+</body>
+</html>

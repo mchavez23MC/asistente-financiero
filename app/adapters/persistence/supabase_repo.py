@@ -25,7 +25,10 @@ from app.domain.models import (
     Budget,
     Category,
     ConversationSummary,
+    Document,
+    DocumentItem,
     Message,
+    ReviewTask,
     Recuerdo,
     RecurringIncome,
     Session,
@@ -583,6 +586,210 @@ class SupabaseRepository:
 
     def delete_session(self, token_hash: str) -> None:
         self._db.table("sessions").delete().eq("token_hash", token_hash).execute()
+
+    # --- documentos financieros (plan de documentos, E1) ----------------------
+    def save_document(self, document: Document) -> Document:
+        res = self._db.table("documents").insert(_dump(document)).execute()
+        return Document(**res.data[0])
+
+    def get_document(self, user_id: UUID, document_id: UUID) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("id", str(document_id))
+            .limit(1)
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
+    def find_document_by_sha(self, user_id: UUID, sha256: str) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("sha256", sha256)
+            .limit(1)
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
+    def find_document_by_clave(
+        self, user_id: UUID, clave_acceso: str
+    ) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("clave_acceso", clave_acceso)
+            .limit(1)
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
+    def find_document_esperando(self, user_id: UUID) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("status", "esperando_clasificacion")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
+    def update_document(
+        self, user_id: UUID, document_id: UUID, cambios: dict
+    ) -> Optional[Document]:
+        res = (
+            self._db.table("documents")
+            .update(cambios)
+            .eq("user_id", str(user_id))
+            .eq("id", str(document_id))
+            .execute()
+        )
+        return Document(**res.data[0]) if res.data else None
+
+    def count_documents_desde(self, user_id: UUID, desde: datetime) -> int:
+        res = (
+            self._db.table("documents")
+            .select("id", count="exact")
+            .eq("user_id", str(user_id))
+            .gte("created_at", desde.isoformat())
+            .execute()
+        )
+        return res.count or 0
+
+    # --- staging de carga masiva (E3) ----------------------------------------
+    def save_document_items(self, items: list[DocumentItem]) -> list[DocumentItem]:
+        if not items:
+            return []
+        res = self._db.table("document_items").insert([_dump(i) for i in items]).execute()
+        return [DocumentItem(**row) for row in res.data]
+
+    def list_document_items(self, document_id, user_id) -> list[DocumentItem]:
+        res = (
+            self._db.table("document_items")
+            .select("*")
+            .eq("document_id", str(document_id))
+            .eq("user_id", str(user_id))
+            .order("n_linea")
+            .execute()
+        )
+        return [DocumentItem(**row) for row in res.data]
+
+    def update_document_items(self, user_id, cambios: list[dict]) -> None:
+        for cambio in cambios:
+            item_id = cambio.get("id")
+            if not item_id:
+                continue
+            campos = {k: v for k, v in cambio.items() if k != "id"}
+            self._db.table("document_items").update(campos).eq("id", str(item_id)).eq(
+                "user_id", str(user_id)
+            ).execute()
+
+    def insert_transactions_batch(
+        self, transacciones: list[Transaction], document_id=None
+    ) -> list[Transaction]:
+        if not transacciones:
+            return []
+        filas = []
+        for t in transacciones:
+            fila = _dump(t)
+            fila["source"] = "documento"
+            if document_id is not None:
+                fila["document_id"] = str(document_id)
+            filas.append(fila)
+        res = self._db.table("transactions").insert(filas).execute()
+        return [Transaction(**{k: v for k, v in row.items() if k not in ("source", "document_id")}) for row in res.data]
+
+    def movimientos_para_perfil(self, user_id) -> list[dict]:
+        from datetime import date as _date
+        from decimal import Decimal as _Dec
+
+        txs = (
+            self._db.table("transactions")
+            .select("tipo,monto,fecha,comercio,categoria,document_id")
+            .eq("user_id", str(user_id))
+            .eq("status", "confirmada")
+            .execute()
+            .data
+        )
+        docs = (
+            self._db.table("documents")
+            .select("id")
+            .eq("user_id", str(user_id))
+            .not_.is_("clave_acceso", "null")
+            .execute()
+            .data
+        )
+        sri_ids = {d["id"] for d in docs}
+        out = []
+        for t in txs:
+            doc_id = t.get("document_id")
+            out.append(
+                {
+                    "tipo": t["tipo"],
+                    "monto": _Dec(str(t["monto"])) if t.get("monto") is not None else None,
+                    "fecha": _date.fromisoformat(t["fecha"]) if t.get("fecha") else None,
+                    "comercio": t.get("comercio"),
+                    "categoria": t.get("categoria"),
+                    "respaldada": doc_id is not None,
+                    "sri": doc_id in sri_ids,
+                }
+            )
+        return out
+
+    def create_review_task(self, task: ReviewTask) -> ReviewTask:
+        res = self._db.table("review_tasks").insert(_dump(task)).execute()
+        return ReviewTask(**res.data[0])
+
+    def get_review_task(self, user_id, task_id) -> Optional[ReviewTask]:
+        res = (
+            self._db.table("review_tasks")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .eq("id", str(task_id))
+            .limit(1)
+            .execute()
+        )
+        return ReviewTask(**res.data[0]) if res.data else None
+
+    def list_review_tasks(self, user_id, status=None) -> list[ReviewTask]:
+        q = (
+            self._db.table("review_tasks")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .order("created_at", desc=True)
+        )
+        if status:
+            q = q.eq("status", status)
+        return [ReviewTask(**row) for row in q.execute().data]
+
+    def complete_review_task(self, user_id, task_id) -> None:
+        self._db.table("review_tasks").update(
+            {"status": "completada", "completed_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("user_id", str(user_id)).eq("id", str(task_id)).execute()
+
+    def list_documents(
+        self, user_id, desde=None, hasta=None, tipo=None, limite=10
+    ) -> list[Document]:
+        q = (
+            self._db.table("documents")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .order("created_at", desc=True)
+            .limit(limite)
+        )
+        if desde:
+            q = q.gte("created_at", desde)
+        if hasta:
+            q = q.lte("created_at", f"{hasta}T23:59:59")
+        if tipo:
+            q = q.eq("tipo_documento", tipo)
+        res = q.execute()
+        return [Document(**row) for row in res.data]
 
 
 def _inicio_periodo(periodo: str):

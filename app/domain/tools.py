@@ -446,6 +446,71 @@ CREAR_TICKET = {
     #   sensibles (reclamo, regulatorio, consejo_inversion, fraude) escalan directo.
 }
 
+# --- Documentos: consultar los respaldos guardados (plan de documentos) ------
+CONSULTAR_DOCUMENTOS = {
+    "name": "consultar_documentos",
+    "description": (
+        "Lista los documentos/respaldos que el usuario te ha enviado (facturas, "
+        "comprobantes, planillas, estados de cuenta), más recientes primero. "
+        "Úsala cuando pregunte por sus respaldos ('¿qué facturas tengo de "
+        "junio?', '¿guardaste el comprobante de la luz?'). SIEMPRE consúltala "
+        "antes de decir que no tienes algo. El sistema lista; tú solo lo "
+        "explicas — no inventes documentos."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "desde": {
+                "type": "string",
+                "description": "Fecha inicial YYYY-MM-DD (por fecha de recepción). Opcional.",
+            },
+            "hasta": {
+                "type": "string",
+                "description": "Fecha final YYYY-MM-DD. Opcional.",
+            },
+            "tipo": {
+                "type": "string",
+                "enum": [
+                    "factura_sri",
+                    "transferencia",
+                    "planilla_servicio",
+                    "estado_cuenta",
+                    "rol_pagos",
+                    "voucher",
+                    "otro_respaldo",
+                ],
+                "description": "Filtrar por tipo de documento. Opcional.",
+            },
+            "limite": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "description": "Cuántos listar. Por defecto 10.",
+            },
+        },
+        "required": [],
+    },
+    # Retorno documentado:
+    #   {"documentos": [{"tipo": str, "emisor": str|null, "fecha": str|null,
+    #     "total": number|null, "archivo": str|null}], "cuantos": int}
+}
+
+# --- Perfil financiero verificable (plan de documentos, E5) ------------------
+CONSULTAR_PERFIL = {
+    "name": "consultar_perfil",
+    "description": (
+        "Devuelve el resumen del PERFIL FINANCIERO VERIFICABLE del usuario (su "
+        "índice de verificación, ingresos respaldados, regularidad, antigüedad). "
+        "Úsala cuando pregunte por su perfil, su índice, o si 'puede optar a un "
+        "crédito'. NUNCA des estos números de memoria: sácalos siempre de aquí. "
+        "El perfil solo cuenta lo que tiene respaldo; los datos vienen del sistema."
+    ),
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+    # Retorno: {"estado": str, "indice_verificacion": number, "meses_activo": int,
+    #   "ingreso_promedio_respaldado": number, "regularidad_ingresos": number,
+    #   "transacciones_respaldadas": int}
+}
+
 #: Set completo de tools del agente principal (H1 + H2 + H3 como opción C, §1).
 TOOLS: list[dict] = [
     REGISTRAR_GASTO,
@@ -458,6 +523,8 @@ TOOLS: list[dict] = [
     CONFIGURAR_PRESUPUESTO,
     RESPONDER_SOPORTE,
     CREAR_TICKET,
+    CONSULTAR_DOCUMENTOS,
+    CONSULTAR_PERFIL,
 ]
 
 #: Nombres válidos, para validación en el dispatcher (fase 2/4).

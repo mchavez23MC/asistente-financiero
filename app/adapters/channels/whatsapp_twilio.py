@@ -25,13 +25,7 @@ import logging
 
 import httpx
 
-from app.domain.models import (
-    MEDIA_MAX_BYTES_IMAGEN,
-    MEDIA_MAX_BYTES_PDF,
-    IncomingMessage,
-    MediaItem,
-    User,
-)
+from app.domain.models import IncomingMessage, MediaItem, User
 
 TWILIO_API_BASE = "https://api.twilio.com/2010-04-01"
 
@@ -46,9 +40,14 @@ class WhatsAppTwilioAdapter:
         account_sid: str,
         auth_token: str,
         whatsapp_from: str,
+        descargar_extendido: bool = False,
     ) -> None:
         self._account_sid = account_sid
         self._auth_token = auth_token
+        # Con el flujo de documentos activo (DOCS_HABILITADO) también se
+        # descargan XML/CSV/XLSX (item.descargable); apagado, solo lo que el
+        # modelo puede ver (item.soportado) — no se baja nada en vano (R4).
+        self._descargar_extendido = descargar_extendido
         # Número emisor en formato Twilio ('whatsapp:+14155238886').
         self._from = self._to_whatsapp(whatsapp_from)
         self._url = f"{TWILIO_API_BASE}/Accounts/{account_sid}/Messages.json"
@@ -123,12 +122,13 @@ class WhatsAppTwilioAdapter:
         Un adjunto que falla o excede el límite queda con data_base64=None y el
         agente se lo dice al usuario — nunca tira el pipeline completo."""
         for item in incoming.media:
-            if not item.url or not item.soportado or item.data_base64 is not None:
+            permitido = item.descargable if self._descargar_extendido else item.soportado
+            if not item.url or not permitido or item.data_base64 is not None:
                 continue
             try:
                 resp = await self._get_client().get(item.url, follow_redirects=True)
                 resp.raise_for_status()
-                limite = MEDIA_MAX_BYTES_IMAGEN if item.es_imagen else MEDIA_MAX_BYTES_PDF
+                limite = item.limite_bytes
                 if len(resp.content) > limite:
                     log.warning(
                         "Adjunto %s de %s excede el límite (%d bytes); se omite.",

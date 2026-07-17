@@ -163,7 +163,7 @@ async def test_agente_recibe_la_memoria_en_el_system():
 
 
 async def test_agente_sin_memoria_no_agrega_bloque():
-    """Sin memoria, el system queda igual que antes (2 bloques: cacheado + fecha)."""
+    """Sin memoria recuperada, ningún bloque de memoria entra al system."""
     repo = FakeRepo()
     llm = ScriptedLLM([_texto("hola")])
     user = _user(repo)
@@ -173,7 +173,9 @@ async def test_agente_sin_memoria_no_agrega_bloque():
         historial=[],
     )
     await _agente(llm, repo).handle(ctx)
-    assert len(llm.llamadas[0]["system"]) == 2
+    textos = " ".join(b["text"] for b in llm.llamadas[0]["system"])
+    assert "RECUERDOS RELEVANTES" not in textos
+    assert "LO QUE SABES DEL USUARIO" not in textos
 
 
 # --- integración con ProcessMessage (run_agent recupera e indexa) ------------

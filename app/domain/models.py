@@ -337,6 +337,19 @@ class Session(BaseModel):
 MEDIA_TIPOS_IMAGEN = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
 MEDIA_TIPO_PDF = "application/pdf"
 
+#: Tipos que se procesan por SCRIPT (plan de documentos), nunca como bloque de
+#: visión: la API de Anthropic no los acepta (riesgo R4).
+MEDIA_TIPOS_XML = frozenset({"text/xml", "application/xml"})
+MEDIA_TIPOS_TABULAR = frozenset(
+    {
+        "text/csv",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
+)
+MEDIA_MAX_BYTES_XML = 2 * 1024 * 1024
+MEDIA_MAX_BYTES_TABULAR = 10 * 1024 * 1024
+
 #: Límites de tamaño (bytes) antes de base64 — el API de Anthropic rechaza
 #: imágenes > 5MB; el PDF se acota para no inflar el request.
 MEDIA_MAX_BYTES_IMAGEN = 5 * 1024 * 1024
@@ -366,9 +379,35 @@ class MediaItem(BaseModel):
         return self.content_type == MEDIA_TIPO_PDF
 
     @property
+    def es_xml(self) -> bool:
+        return self.content_type in MEDIA_TIPOS_XML
+
+    @property
+    def es_tabular(self) -> bool:
+        return self.content_type in MEDIA_TIPOS_TABULAR
+
+    @property
     def soportado(self) -> bool:
         """Solo imágenes y PDF llegan al modelo; audio/video/otros se declinan."""
         return self.es_imagen or self.es_pdf
+
+    @property
+    def descargable(self) -> bool:
+        """Qué vale la pena bajar del canal cuando el flujo de documentos está
+        activo: lo que ve el modelo (soportado) + lo que procesan los scripts
+        (XML/CSV/XLSX). `soportado` NO cambia: gobierna los bloques de visión
+        (riesgo R4 del plan de documentos)."""
+        return self.soportado or self.es_xml or self.es_tabular
+
+    @property
+    def limite_bytes(self) -> int:
+        if self.es_imagen:
+            return MEDIA_MAX_BYTES_IMAGEN
+        if self.es_xml:
+            return MEDIA_MAX_BYTES_XML
+        if self.es_tabular:
+            return MEDIA_MAX_BYTES_TABULAR
+        return MEDIA_MAX_BYTES_PDF
 
     @property
     def etiqueta(self) -> str:
@@ -472,3 +511,119 @@ class AgentResult(BaseModel):
     respuesta: str
     intencion: Intencion = Intencion.OTRO
     tool_llamada: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Documentos financieros (plan de documentos, contrato del módulo 01)
+# ---------------------------------------------------------------------------
+class TipoDocumento(str, Enum):
+    FACTURA_SRI = "factura_sri"
+    RETENCION = "retencion"
+    NOTA_CREDITO = "nota_credito"
+    TRANSFERENCIA = "transferencia"
+    PLANILLA_SERVICIO = "planilla_servicio"
+    ESTADO_CUENTA = "estado_cuenta"
+    ROL_PAGOS = "rol_pagos"
+    VOUCHER = "voucher"
+    OTRO_RESPALDO = "otro_respaldo"
+    SIN_CLASIFICAR = "sin_clasificar"
+
+
+class DocumentStatus(str, Enum):
+    RECIBIDO = "recibido"
+    ESPERANDO_CLASIFICACION = "esperando_clasificacion"
+    PROCESANDO = "procesando"
+    EXTRAIDO = "extraido"
+    EN_REVISION = "en_revision"
+    CONFIRMADO = "confirmado"
+    ERROR = "error"
+    DESCARTADO = "descartado"
+
+
+class Document(BaseModel):
+    """Todo archivo recibido, con su original a salvo en Storage (espejo 1:1 de
+    la tabla `documents`). Primero persistir, después interpretar: la fila y el
+    objeto en Storage existen ANTES de cualquier extracción."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: Optional[UUID] = None
+    user_id: UUID
+    tipo_documento: TipoDocumento = TipoDocumento.SIN_CLASIFICAR
+    status: DocumentStatus = DocumentStatus.RECIBIDO
+    storage_path: str
+    filename: Optional[str] = None
+    content_type: str
+    size_bytes: int
+    sha256: str
+    clave_acceso: Optional[str] = None
+    emisor_ruc: Optional[str] = None
+    emisor_nombre: Optional[str] = None
+    fecha_emision: Optional[date] = None
+    total: Optional[Decimal] = None
+    metodo_extraccion: Optional[str] = None
+    datos_extraidos: Optional[dict[str, Any]] = None
+    error_detalle: Optional[str] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    processed_at: Optional[datetime] = None
+
+
+class DocumentItemEstado(str, Enum):
+    PENDIENTE = "pendiente"
+    ACEPTADO = "aceptado"
+    RECHAZADO = "rechazado"
+    DUPLICADO = "duplicado"
+
+
+class DocumentItem(BaseModel):
+    """Una fila del staging de una carga masiva (estado de cuenta). NO es una
+    transacción: vive en `document_items` hasta que el usuario la confirma en la
+    webapp, y solo entonces se materializa en `transactions` (riesgo R1)."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: Optional[UUID] = None
+    document_id: UUID
+    user_id: UUID
+    n_linea: int
+    fecha: Optional[date] = None
+    descripcion_raw: str
+    monto: Optional[Decimal] = None
+    tipo: Optional[str] = None  # 'gasto' | 'ingreso'
+    categoria_sugerida: Optional[str] = None
+    counterparty_id: Optional[UUID] = None
+    confianza: Optional[float] = None
+    estado: DocumentItemEstado = DocumentItemEstado.PENDIENTE
+    transaction_id: Optional[UUID] = None
+
+
+class ReviewTaskTipo(str, Enum):
+    CARGA_MASIVA = "carga_masiva"
+    MAPEO = "mapeo"
+    DATO_FALTANTE = "dato_faltante"
+    AJUSTE_NC = "ajuste_nc"
+    DIVISION_ITEMS = "division_items"
+
+
+class ReviewTaskStatus(str, Enum):
+    PENDIENTE = "pendiente"
+    EN_PROGRESO = "en_progreso"
+    COMPLETADA = "completada"
+    EXPIRADA = "expirada"
+    DESCARTADA = "descartada"
+
+
+class ReviewTask(BaseModel):
+    """Una tarea en la cola de revisión de la webapp (estado de cuenta con muchos
+    movimientos → el usuario los confirma en bloque en su panel)."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: Optional[UUID] = None
+    user_id: UUID
+    document_id: UUID
+    tipo: ReviewTaskTipo = ReviewTaskTipo.CARGA_MASIVA
+    status: ReviewTaskStatus = ReviewTaskStatus.PENDIENTE
+    resumen: str
+    created_at: datetime = Field(default_factory=_utcnow)
+    completed_at: Optional[datetime] = None

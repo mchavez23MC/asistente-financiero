@@ -32,6 +32,8 @@ _PAGINAS: dict[str, str] = {
     "/app/movimientos": "app/movimientos.html",
     "/app/presupuestos": "app/presupuestos.html",
     "/app/tickets": "app/tickets.html",
+    "/app/documentos": "app/documentos.html",
+    "/app/perfil": "app/perfil.html",
     "/legal": "legal.html",
 }
 
@@ -51,3 +53,11 @@ def _registrar(ruta: str, relativo: str) -> None:
 
 for _ruta, _archivo in _PAGINAS.items():
     _registrar(_ruta, _archivo)
+
+
+# Ruta parametrizada (plan de documentos, módulo 04): sirve el mismo HTML; el JS
+# lee el task_id de location.pathname. Se registra aparte para no tocar el dict
+# de rutas fijas (riesgo R12).
+@router.get("/app/revisar/{task_id}", include_in_schema=False)
+async def revisar(task_id: str) -> FileResponse:
+    return _servir("app/revisar.html")

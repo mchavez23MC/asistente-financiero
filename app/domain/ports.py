@@ -29,12 +29,15 @@ from app.domain.models import (
     Budget,
     Category,
     ConversationSummary,
+    Document,
+    DocumentItem,
     GuardrailResult,
     IncomingMessage,
     LLMResponse,
     Message,
     Recuerdo,
     RecurringIncome,
+    ReviewTask,
     Session,
     Ticket,
     Transaction,
@@ -378,4 +381,120 @@ class Repository(Protocol):
         ...
 
     def delete_session(self, token_hash: str) -> None:
+        ...
+
+    # --- documentos financieros (plan de documentos, E1) ----------------------
+    def save_document(self, document: "Document") -> "Document":
+        ...
+
+    def get_document(self, user_id: UUID, document_id: UUID) -> Optional["Document"]:
+        """Un documento por id, SIEMPRE filtrado por user_id (§7.3.2)."""
+        ...
+
+    def find_document_by_sha(self, user_id: UUID, sha256: str) -> Optional["Document"]:
+        """Dedupe por hash del archivo original (unique user_id+sha256)."""
+        ...
+
+    def find_document_by_clave(
+        self, user_id: UUID, clave_acceso: str
+    ) -> Optional["Document"]:
+        """Dedupe por clave de acceso del SRI (la misma factura reenviada como
+        XML y luego como PDF tiene distinto sha pero la misma clave)."""
+        ...
+
+    def find_document_esperando(self, user_id: UUID) -> Optional["Document"]:
+        """El documento más reciente en status='esperando_clasificacion' del
+        usuario (para resolver la respuesta de letra del menú)."""
+        ...
+
+    def update_document(
+        self,
+        user_id: UUID,
+        document_id: UUID,
+        cambios: dict,
+    ) -> Optional["Document"]:
+        """Actualiza campos (status, tipo_documento, extracción...) del documento,
+        filtrado por user_id."""
+        ...
+
+    def count_documents_desde(self, user_id: UUID, desde: datetime) -> int:
+        """Documentos recibidos por el usuario desde `desde` (rate limit diario)."""
+        ...
+
+    def list_documents(
+        self,
+        user_id: UUID,
+        desde: Optional[str] = None,
+        hasta: Optional[str] = None,
+        tipo: Optional[str] = None,
+        limite: int = 10,
+    ) -> list["Document"]:
+        """Respaldos del usuario, más recientes primero, filtrables por rango de
+        fecha de recepción (YYYY-MM-DD) y tipo. Grounded: el sistema lista, Luca
+        explica (consultar_documentos)."""
+        ...
+
+
+    # --- staging de carga masiva (estado de cuenta, E3) ----------------------
+    def save_document_items(self, items: list["DocumentItem"]) -> list["DocumentItem"]:
+        """Inserta el staging en bloque (una llamada). No toca transactions."""
+        ...
+
+    def list_document_items(self, document_id: UUID, user_id: UUID) -> list["DocumentItem"]:
+        ...
+
+    def update_document_items(self, user_id: UUID, cambios: list[dict]) -> None:
+        """Aplica ediciones/aceptaciones en bloque desde la revisión (cada dict
+        trae al menos {'id': ...} + los campos a cambiar)."""
+        ...
+
+    def insert_transactions_batch(
+        self, transacciones: list["Transaction"], document_id: Optional[UUID] = None
+    ) -> list["Transaction"]:
+        """LA materialización: inserta con status='confirmada' directamente (la
+        confirmación humana ya ocurrió en la revisión) para no chocar con el
+        índice único de pendientes (riesgo R1). Marca source='documento' y el
+        document_id de respaldo — columnas que solo existen con la migración de
+        documentos, por eso el insert normal (save_transaction) no las envía."""
+        ...
+
+    def movimientos_para_perfil(self, user_id: UUID) -> list[dict]:
+        """Transacciones confirmadas del usuario con las banderas que necesita el
+        perfil financiero (E5): {tipo, monto, fecha, comercio, categoria,
+        respaldada (document_id no nulo), sri (el documento tiene clave SRI)}.
+        SIEMPRE filtrado por user_id (§7.3.2)."""
+        ...
+
+    def create_review_task(self, task: "ReviewTask") -> "ReviewTask":
+        ...
+
+    def get_review_task(self, user_id: UUID, task_id: UUID) -> Optional["ReviewTask"]:
+        """Filtrada por user_id: una tarea ajena devuelve None (aislamiento)."""
+        ...
+
+    def list_review_tasks(
+        self, user_id: UUID, status: Optional[str] = None
+    ) -> list["ReviewTask"]:
+        ...
+
+    def complete_review_task(self, user_id: UUID, task_id: UUID) -> None:
+        ...
+
+
+class DocumentStorage(Protocol):
+    """Almacén de originales (plan de documentos). El core no sabe que es
+    Supabase Storage. El archivo se guarda TAL CUAL llegó (bytes originales:
+    el XML firmado del SRI es el documento legal — jamás re-serializarlo)."""
+
+    def guardar(self, path: str, contenido: bytes, content_type: str) -> None:
+        ...
+
+    def leer(self, path: str) -> bytes:
+        ...
+
+    def signed_url(self, path: str, expira_s: int = 600) -> str:
+        ...
+
+    def borrar(self, path: str) -> None:
+        """Derecho de supresión (LOPDP)."""
         ...
