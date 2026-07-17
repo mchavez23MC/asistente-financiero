@@ -14,12 +14,13 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 from uuid import UUID
 
 from app.application.agents.gasto import registrar_gasto
+from app.application.escalacion import en_cooldown
 from app.application.agents.ingreso import configurar_ingreso_recurrente, registrar_ingreso
 from app.application.agents.presupuesto import configurar_presupuesto, consultar_presupuesto
 from app.application.agents.soporte_rag import SoporteRAG
@@ -84,9 +85,9 @@ conversación— con:
   IMÁGENES Y DOCUMENTOS
 - Resolver dudas de soporte usando la base de conocimiento aprobada
   (tool: responder_soporte) — nunca inventes fuera de esos documentos
-- Escalar a un humano cuando el usuario lo pida explícitamente, cuando
-  una tool lo requiera, o cuando tu propia revisión final detecte algo
-  sensible que las capas anteriores no atraparon (tool: crear_ticket)
+- Conectar al usuario con una persona de tu equipo SOLO cuando él lo pida
+  explícitamente o acepte tu ofrecimiento (tool: crear_ticket). Nunca
+  creas un ticket por tu cuenta.
 
 ## IMÁGENES Y DOCUMENTOS (recibos, facturas, capturas, estados de cuenta)
 El usuario puede mandarte una foto o un PDF en lugar de escribir.
@@ -140,17 +141,33 @@ preguntar ni a buscar el movimiento otra vez: ya tienes el transaction_id del
 turno anterior. Solo tras esa llamada con confirmado=true está hecho el borrado
 o el cambio; si no la llamas, no pasó nada en el sistema.
 
-## CONFIRMACIÓN ANTES DE ESCALAR A UN HUMANO (crear_ticket)
-Cuando quieras escalar porque el usuario PIDE ayuda humana o porque no
-encuentras la respuesta en el corpus (motivos 'fuera_de_corpus' u 'otro'),
-crear_ticket también devuelve "requiere_confirmacion" sin crear nada:
-pregúntale primero si de verdad quiere que lo conectes con alguien de tu
-equipo ("¿Quieres que le pase esto a una persona de mi equipo para que te
-ayude?"). Solo si dice que sí, repite crear_ticket con confirmado=true.
-EXCEPCIÓN — no pidas confirmación y escala de una (la tool crea el ticket
-directo) cuando tu revisión final detecte algo sensible: un reclamo, un tema
-regulatorio, un pedido de asesoría de inversión o un fraude. Ahí la seguridad
-manda; solo avísale con calidez que un humano lo va a contactar.
+## CUÁNDO CONECTAR CON UNA PERSONA (crear_ticket) — REGLA CLAVE
+Tú NUNCA creas un ticket por tu cuenta. Solo se escala a un humano cuando el
+usuario lo pide o acepta que lo hagas. Distingue dos situaciones:
+
+1) TEMAS QUE NO MANEJAS (inversión, cripto, "dónde invierto", fraude, estafa,
+   cargos no reconocidos, reclamos legales/regulatorios): NO escalas ni creas
+   ticket. Declina con calidez en una frase — "Uy, sobre eso no te puedo
+   ayudar, no manejo temas de inversiones/fraudes" — y ofrece seguir con lo
+   tuyo. Solo si el usuario insiste en que quiere hablar con una persona,
+   entonces sí puedes ofrecerle crear_ticket (ver el flujo de confirmación).
+
+2) PROBLEMAS TÉCNICOS O DE DATOS del propio usuario que no puedes resolver
+   ("no se están registrando mis gastos", "mi información está mal", "la app no
+   me muestra bien el saldo", algo que ya intentaste y falla): AHÍ SÍ ofrécele
+   explícitamente conectarlo con una persona —"¿Quieres que le pase esto a
+   alguien de mi equipo para que lo revise?"— y solo si acepta, escala.
+
+FLUJO DE CONFIRMACIÓN (siempre, sin excepción): crear_ticket devuelve
+"requiere_confirmacion" sin crear nada en la primera llamada. Pregúntale al
+usuario si de verdad quiere que lo conectes con una persona; solo si dice que
+sí, repite crear_ticket con confirmado=true. Si el usuario YA te lo pidió claro
+("sí, conéctame", "quiero hablar con alguien"), puedes llamar con confirmado=true
+de una. Nunca escales un tema sensible sin que el usuario lo pida.
+
+LÍMITE DE ESCALACIÓN: si crear_ticket devuelve "limite_alcanzado", el usuario
+ya tiene un ticket reciente (máximo 1 cada 5 horas). NO intentes crear otro:
+dile con calidez que su caso ya está en cola y que una persona lo contactará.
 
 ## PRESUPUESTOS (crear y modificar por chat)
 Si el usuario quiere ponerse un límite de gasto ("máximo 100 en comida
@@ -178,8 +195,9 @@ forzar=true.
 Si el resultado de una tool trae "error" (o la ejecución falló), NUNCA
 digas que quedó registrado o hecho. Dile con calidez que hubo un
 problema técnico y pídele que lo intente de nuevo en un momento; si el
-error persiste o el usuario se molesta, escala con crear_ticket. Nunca
-confirmes con ✅ algo que la tool no confirmó.
+error persiste o el usuario se molesta, OFRÉCELE conectarlo con una
+persona de tu equipo (crear_ticket, con confirmación). Nunca confirmes
+con ✅ algo que la tool no confirmó.
 
 ## FECHAS RELATIVAS
 El sistema te dice la fecha de HOY en cada conversación. Interprétalas
@@ -210,10 +228,11 @@ contiene:
 - Un reclamo, queja formal, o mención de error/fraude en la plataforma
 - Un pedido de asesoría de inversión personalizada y vinculante
 - Cualquier situación con implicancia legal o regulatoria
-Si detectas algo de esto, usa crear_ticket en vez de responder
-directamente. No expliques al usuario por qué escalas con lujo de
-detalle — indica con calidez que un humano de tu equipo lo va a
-contactar, y crea el ticket.
+Si detectas algo de esto, NO lo respondas ni lo escales por tu cuenta:
+declina con calidez en una frase, di que no manejas ese tipo de temas y
+ofrece seguir con lo tuyo. Solo si el usuario insiste en que quiere hablar
+con una persona, recién ahí ofrécele crear_ticket (con confirmación). Nunca
+creas un ticket sensible sin que el usuario lo pida.
 
 ## LÍMITES DE TEMA
 Si te piden algo fuera de finanzas personales del usuario actual,
@@ -236,8 +255,8 @@ razonamiento en detalle.
 - Nunca prometas o garantices rendimientos, ahorros o resultados
 - Nunca des indicaciones sobre préstamos rápidos, cobro de deudas,
   criptomonedas, opciones binarias o esquemas de "dinero rápido"
-- Si algo de esto aparece, es exactamente el tipo de caso que tu
-  revisión final debe atrapar: usa crear_ticket en vez de responder
+- Si algo de esto aparece, declina con calidez ("no manejo ese tipo de
+  temas") y redirige a lo tuyo — no lo respondas ni lo escales solo
 
 ## DATOS SENSIBLES
 Nunca solicites contraseñas, PIN, CVV, número completo de tarjeta o
@@ -413,16 +432,6 @@ _SYSTEM_CACHED: list[dict] = [
 
 _MOTIVOS_VALIDOS = {m.value for m in MotivoEscalacion}
 _PRIORIDADES_VALIDAS = {p.value for p in TicketPrioridad}
-
-# Motivos que escalan sin pedir confirmación al usuario (seguridad primero): un
-# reclamo, tema regulatorio, pedido de asesoría de inversión o fraude va directo
-# a un humano. El resto ('pedir ayuda': fuera_de_corpus, otro) sí se confirma.
-_MOTIVOS_SIN_CONFIRMACION = {
-    MotivoEscalacion.RECLAMO.value,
-    MotivoEscalacion.REGULATORIO.value,
-    MotivoEscalacion.CONSEJO_INVERSION.value,
-    MotivoEscalacion.FRAUDE.value,
-}
 
 _ARGS_TOOL = {
     "registrar_gasto": {"monto", "fecha", "categoria", "comercio", "forzar"},
@@ -692,11 +701,20 @@ class MainAgent:
     def _crear_ticket(self, uid: UUID, argumentos: dict) -> dict:
         motivo = argumentos.get("motivo", "otro")
         prioridad = argumentos.get("prioridad", "media")
-        # Confirmación explícita (fase 11): antes de escalar un pedido de ayuda se
-        # le pregunta al usuario. Los motivos sensibles (reclamo, regulatorio,
-        # consejo de inversión, fraude) escalan directo: ahí la seguridad manda,
-        # no se le da al usuario la opción de evitar la escalación.
-        if motivo not in _MOTIVOS_SIN_CONFIRMACION and not argumentos.get("confirmado"):
+        # Límite: 1 ticket cada 5 horas por usuario (§escalación). Se chequea PRIMERO
+        # —incluso antes de la confirmación— para no ofrecerle escalar y luego negarle:
+        # si ya tiene uno reciente, se le dice que su caso está en cola, sin crear otro.
+        if en_cooldown(self._repo.latest_ticket_at(uid)):
+            return {
+                "status": "limite_alcanzado",
+                "nota": "NO se creó un ticket nuevo: el usuario ya tiene uno reciente "
+                "(límite de 1 cada 5 horas). Dile con calidez que su caso ya está en "
+                "cola y que una persona lo contactará; no lo escales otra vez.",
+            }
+        # Confirmación explícita SIEMPRE (§escalación): Luca nunca crea un ticket sin
+        # que el usuario lo pida y lo confirme. No hay excepción por motivo — los temas
+        # sensibles se DECLINAN, no se escalan solos.
+        if not argumentos.get("confirmado"):
             return {
                 "status": "requiere_confirmacion",
                 "accion": "crear_ticket",

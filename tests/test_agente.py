@@ -16,6 +16,8 @@ from app.domain.models import (
     Budget,
     IncomingMessage,
     LLMResponse,
+    MotivoEscalacion,
+    Ticket,
     ToolCall,
     Transaction,
     User,
@@ -159,19 +161,45 @@ async def test_crear_ticket_confirmado_escala():
     assert len(repo.tickets) == 1
 
 
-async def test_crear_ticket_motivo_sensible_escala_sin_confirmar():
-    """Seguridad primero: un fraude escala directo, sin pedirle permiso al usuario."""
+async def test_crear_ticket_motivo_sensible_tambien_pide_confirmacion():
+    """Luca ya NO escala solo: incluso un motivo sensible pide confirmación —
+    Luca nunca crea un ticket sin que el usuario lo pida."""
     repo = FakeRepo()
     llm = ScriptedLLM(
         [
             _tool("crear_ticket", {"motivo": "fraude", "contexto": "cargo no reconocido"}),
-            _texto("Ya avisé a mi equipo, te contactan."),
+            _texto("¿Quieres que te conecte con una persona de mi equipo?"),
         ]
     )
     await _agente(llm, repo).handle(_contexto(repo, "hay un cargo que no hice"))
 
+    # No se creó el ticket: la tool pidió confirmación primero.
+    assert len(repo.tickets) == 0
+    tool_result = llm.llamadas[1]["messages"][-1]["content"][0]["content"]
+    assert "requiere_confirmacion" in tool_result
+
+
+async def test_crear_ticket_bloqueado_por_limite_de_5h():
+    """Si ya hay un ticket reciente, crear_ticket devuelve 'limite_alcanzado' y
+    NO crea otro, aunque el usuario confirme."""
+    repo = FakeRepo()
+    ctx = _contexto(repo, "conéctame de nuevo")
+    # Ya existe un ticket reciente para este usuario.
+    repo.create_ticket(
+        Ticket(user_id=ctx.user.id, motivo=MotivoEscalacion.OTRO, contexto="previo")
+    )
+    llm = ScriptedLLM(
+        [
+            _tool("crear_ticket", {"motivo": "otro", "contexto": "quiere humano", "confirmado": True}),
+            _texto("Tu caso ya está en cola, te contactan."),
+        ]
+    )
+    await _agente(llm, repo).handle(ctx)
+
+    # Sigue habiendo solo el ticket previo: no se creó uno nuevo.
     assert len(repo.tickets) == 1
-    assert next(iter(repo.tickets.values())).motivo == "fraude"
+    tool_result = llm.llamadas[1]["messages"][-1]["content"][0]["content"]
+    assert "limite_alcanzado" in tool_result
 
 
 # --- H2: consultar presupuesto (grounded) -----------------------------------------

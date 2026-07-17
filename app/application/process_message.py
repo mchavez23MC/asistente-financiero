@@ -33,6 +33,7 @@ from app.domain.models import (
     TicketPrioridad,
 )
 from app.application.memoria import MemoriaSemantica
+from app.application.escalacion import en_cooldown, pide_humano
 from app.domain.ports import AgentRegistry, ChannelAdapter, Guardrail, Repository
 
 log = logging.getLogger("e5.orquestador")
@@ -53,16 +54,34 @@ AVISO_LEGAL = (
     "¿En qué te ayudo?"
 )
 
-# Ruta sensible (pre-Luca): voz cálida de Luca, sin detalle de por qué se escala.
+# Ruta sensible (pre-Luca): Luca DECLINA con calidez, SIN crear ticket. Estos
+# temas (inversión, fraude, reclamos regulatorios) no los maneja; pero deja
+# abierta la puerta a una persona por si el usuario de verdad la necesita.
 RESPUESTA_SENSIBLE = (
-    "Eso mejor lo ve alguien de mi equipo 🙌 — ya les pasé tu caso y te "
-    "contactan en breve. Mientras tanto, aquí sigo para lo de tus gastos."
+    "Uy, sobre eso no te puedo ayudar 🙏 No manejo temas de inversiones, "
+    "fraudes ni reclamos formales. Aquí sigo para todo lo de tus gastos, "
+    "ingresos y presupuesto. Si necesitas, dime 'quiero hablar con una "
+    "persona' y te conecto con alguien de mi equipo."
 )
 
-# Groq caído/timeout (fail-closed §7.3.4): se pide reintento sin prometer humano.
+# Pedido explícito de humano atendido: se creó el ticket.
+RESPUESTA_TICKET_CREADO = (
+    "Listo 🙌 ya le pasé tu caso a una persona de mi equipo; te contactan en "
+    "breve. Mientras tanto, aquí sigo para lo de tus gastos."
+)
+
+# Pedido de humano pero ya hay un ticket reciente (límite de 1 cada 5 horas):
+# no se crea otro, se le dice que su caso ya está en cola.
+RESPUESTA_TICKET_EN_COLA = (
+    "Tu caso ya está en cola con una persona de mi equipo 🙌 te van a "
+    "contactar. Mientras tanto, aquí sigo para lo de tus gastos."
+)
+
+# Groq caído/timeout (fail-closed §7.3.4): se pide reintento sin prometer humano
+# y SIN crear ticket (nadie lo pidió).
 RESPUESTA_FAIL_CLOSED = (
     "Dame un momentito 🙏 — no pude procesar tu mensaje con seguridad. "
-    "Ya avisé al equipo; prueba de nuevo en unos minutos, ñaño."
+    "Prueba de nuevo en unos minutos, ñaño."
 )
 
 # Aviso de espera cuando el agente tarda más del umbral (§7.5): que el usuario
@@ -161,8 +180,15 @@ class ProcessMessage:
             self._repo.save_message,
             Message(user_id=user.id, rol=Rol.USUARIO, contenido=contenido),
         )
+        # Escalación SOLO si el usuario pide explícitamente una persona (§escalación):
+        # ese pedido tiene prioridad sobre la ruta sensible — si pide humano sobre
+        # un tema sensible, se lo conectamos igual (respetando el límite de 5h).
+        if pide_humano(contenido):
+            await self._escalar_por_pedido(user, incoming, veredicto, mensaje)
+            return None
+        # Tema sensible sin pedido de humano: se DECLINA, sin crear ticket.
         if veredicto.sensible:
-            await self._escalar(user, incoming, veredicto, mensaje)
+            await self._responder_sensible(user, veredicto)
             return None
 
         # --- contexto: historial + transacción pendiente en paralelo ----------
@@ -254,17 +280,25 @@ class ProcessMessage:
         log.info("aviso de espera enviado a %s (agente > %ss)", context.user.id, self._aviso_espera_umbral_s)
 
     # ------------------------------------------------------------------ internos
-    async def _escalar(
+    async def _escalar_por_pedido(
         self,
         user,
         incoming: IncomingMessage,
         veredicto: GuardrailResult,
         mensaje: Message,
     ) -> None:
-        """Ruta sensible (§7.3): ticket con contexto + respuesta de escalación.
-        El mensaje NUNCA llega al agente principal."""
-        motivo = _motivo_de(veredicto)
-        fail_closed = motivo == MotivoEscalacion.GUARDRAIL_FAIL_CLOSED
+        """El usuario pidió EXPLÍCITAMENTE una persona (§escalación): se crea el
+        ticket, salvo que ya tenga uno reciente (límite de 1 cada 5h) — en cuyo
+        caso se le avisa que su caso ya está en cola. El mensaje NUNCA llega al
+        agente principal. Si el pedido venía sobre un tema sensible, el motivo/
+        prioridad se toman del guardrail; si no, es un pedido de ayuda ('otro')."""
+        ultimo = await asyncio.to_thread(self._repo.latest_ticket_at, user.id)
+        if en_cooldown(ultimo):
+            await self._enviar_seguro(user, RESPUESTA_TICKET_EN_COLA)
+            await self._audit_respuesta(user.id, RESPUESTA_TICKET_EN_COLA, Intencion.SENSIBLE)
+            return
+
+        motivo = _motivo_de(veredicto) if veredicto.sensible else MotivoEscalacion.OTRO
         await asyncio.to_thread(
             self._repo.create_ticket,
             Ticket(
@@ -276,12 +310,21 @@ class ProcessMessage:
                     else TicketPrioridad.MEDIA
                 ),
                 contexto=(
-                    f"Mensaje: {incoming.texto!r} | guardrail: fuente={veredicto.fuente}, "
-                    f"categoria={veredicto.categoria}, confianza={veredicto.confianza:.2f}"
+                    f"Pedido explícito de humano. Mensaje: {incoming.texto!r} | "
+                    f"guardrail: fuente={veredicto.fuente}, categoria={veredicto.categoria}, "
+                    f"confianza={veredicto.confianza:.2f}"
                 ),
                 mensaje_origen_id=mensaje.id,
             ),
         )
+        await self._enviar_seguro(user, RESPUESTA_TICKET_CREADO)
+        await self._audit_respuesta(user.id, RESPUESTA_TICKET_CREADO, Intencion.SENSIBLE)
+
+    async def _responder_sensible(self, user, veredicto: GuardrailResult) -> None:
+        """Tema sensible (inversión, fraude, reclamo regulatorio) sin pedido de
+        humano: se DECLINA con calidez, SIN crear ticket. El mensaje NUNCA llega
+        al agente principal (§7.3). El fail-closed (Groq caído) pide reintento."""
+        fail_closed = _motivo_de(veredicto) == MotivoEscalacion.GUARDRAIL_FAIL_CLOSED
         respuesta = RESPUESTA_FAIL_CLOSED if fail_closed else RESPUESTA_SENSIBLE
         await self._enviar_seguro(user, respuesta)
         await self._audit_respuesta(user.id, respuesta, Intencion.SENSIBLE)

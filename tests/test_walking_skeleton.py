@@ -290,6 +290,10 @@ class FakeRepo:
         self.tickets[ticket.id] = ticket
         return ticket
 
+    def latest_ticket_at(self, user_id: UUID):
+        fechas = [t.created_at for t in self.tickets.values() if t.user_id == user_id]
+        return max(fechas) if fechas else None
+
     def list_tickets(self, estado: Optional[str] = None) -> list[Ticket]:
         vals = list(self.tickets.values())
         if estado:

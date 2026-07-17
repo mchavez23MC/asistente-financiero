@@ -435,6 +435,20 @@ class SupabaseRepository:
         res = self._db.table("tickets").insert(_dump(ticket)).execute()
         return Ticket(**res.data[0])
 
+    def latest_ticket_at(self, user_id: UUID) -> Optional[datetime]:
+        res = (
+            self._db.table("tickets")
+            .select("created_at")
+            .eq("user_id", str(user_id))
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            return None
+        valor = res.data[0]["created_at"]
+        return valor if isinstance(valor, datetime) else datetime.fromisoformat(valor)
+
     # --- panel humano (fase 6) --------------------------------------------------
     def get_user(self, user_id: UUID) -> Optional[User]:
         res = self._db.table("users").select("*").eq("id", str(user_id)).limit(1).execute()
