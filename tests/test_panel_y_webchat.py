@@ -75,6 +75,60 @@ def test_panel_responder_envia_por_el_canal():
     assert app.state.channel.enviados[-1][1] == "hola"
 
 
+def test_panel_responder_guarda_mensaje_y_pausa_ia(monkeypatch):
+    """B1 + handoff: la respuesta humana se guarda como mensaje del asistente
+    (marcada 'panel_humano') y el ticket pasa a 'en_proceso' (pausa la IA)."""
+    app, repo, u = _app_panel()
+    ticket = repo.list_tickets()[0]
+    TestClient(app).post(f"/panel/ticket/{ticket.id}/responder", data={"texto": "te ayudo yo"},
+                         headers=_auth_header(), follow_redirects=False)
+    msgs = repo.get_last_n_messages(u.id, 30)
+    guardado = [m for m in msgs if m.contenido == "te ayudo yo"]
+    assert guardado and guardado[-1].tool_llamada == "panel_humano"
+    assert guardado[-1].rol == "assistant"
+    assert repo.get_ticket(ticket.id).estado == "en_proceso"
+
+
+def test_panel_detalle_muestra_respuesta_del_agente():
+    """La respuesta humana aparece en el hilo etiquetada como Agente (bug B1)."""
+    app, repo, u = _app_panel()
+    ticket = repo.list_tickets()[0]
+    from app.domain.models import Message, Rol
+    repo.save_message(Message(user_id=u.id, rol=Rol.ASISTENTE, contenido="respuesta humana",
+                              tool_llamada="panel_humano"))
+    r = TestClient(app).get(f"/panel/ticket/{ticket.id}/hilo", headers=_auth_header())
+    assert r.status_code == 200 and "respuesta humana" in r.text and "Agente" in r.text
+
+
+def test_panel_cerrar_handoff_avisa_al_usuario():
+    """Al cerrar (en_proceso → resuelto) se avisa al usuario que Luca retoma."""
+    app, repo, _ = _app_panel()
+    ticket = repo.list_tickets()[0]
+    repo.update_ticket_estado(ticket.id, "en_proceso")
+    client = TestClient(app)
+    client.post(f"/panel/ticket/{ticket.id}/estado", data={"estado": "resuelto"},
+                headers=_auth_header(), follow_redirects=False)
+    assert repo.get_ticket(ticket.id).estado == "resuelto"
+    assert "Listo" in app.state.channel.enviados[-1][1]  # mensaje de transición
+
+
+def test_panel_estado_invalido_es_422():
+    app, repo, _ = _app_panel()
+    ticket = repo.list_tickets()[0]
+    r = TestClient(app).post(f"/panel/ticket/{ticket.id}/estado", data={"estado": "inventado"},
+                             headers=_auth_header(), follow_redirects=False)
+    assert r.status_code == 422
+
+
+def test_panel_cola_agrupa_por_usuario():
+    app, repo, u = _app_panel()
+    repo.create_ticket(Ticket(user_id=u.id, motivo="otro", contexto="segundo ticket"))
+    r = TestClient(app).get("/panel", headers=_auth_header())
+    # Dos tickets del MISMO usuario → un solo grupo con su nombre y el teléfono enmascarado.
+    assert r.status_code == 200
+    assert "Ana" in r.text and r.text.count("ticket(s)") == 1
+
+
 def test_panel_audit_trail():
     app, repo, u = _app_panel()
     from app.domain.models import Message, Rol
